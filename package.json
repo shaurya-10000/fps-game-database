@@ -28,7 +28,8 @@
     "verify:unique": "ts-node scripts/verify-unique-indexes.ts",
     "verify:backup-restore": "ts-node scripts/verify-backup-restore.ts",
     "load:test-service": "ts-node scripts/load-test-service.ts",
-    "start:worker": "ts-node src/worker.ts"
+    "start:worker": "ts-node src/worker.ts",
+    "seed:catalog": "ts-node scripts/seed-content-catalog.ts"
   },
   "dependencies": {
     "dotenv": "^18.0.8",

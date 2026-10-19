@@ -41,8 +41,9 @@
 - **Event-driven projections.** Ratings, XP, and leaderboards are derived asynchronously through a transactional outbox. They can be rebuilt from scratch without touching canonical data.
 - **Strict ordering.** Per-player rating sequences are enforced atomically. Out-of-order events are deferred, duplicates are no-ops, and gaps block application until resolved.
 - **Security by design.** BOLA-safe responses (404 instead of 403), Zod-strict mass-assignment defense, JWT verification against a JWKS, and mid-session suspension enforcement.
+- **Typed game content model.** Maps, weapons with full ballistics, characters, throwables, equipment, and game modes are strictly typed TypeScript domain models, seeded into versioned catalogs that matches pin to.
 - **Deployed and running.** The REST API runs on Render against a managed MongoDB Atlas cluster. Background workers run separately from the HTTP server.
-- **Tested against a real database.** 103 passing tests (25 unit, 78 integration) cover concurrency, failure injection, crash recovery, and state machines. Integration tests use real MongoDB transactions, not mocks.
+- **Tested against a real database.** 99 passing tests (25 unit, 74 integration) cover concurrency, failure injection, crash recovery, and state machines. Integration tests use real MongoDB transactions, not mocks.
 
 ## Features
 
@@ -55,6 +56,7 @@
 | **Matchmaking** | Ticket state machine, atomic allocation, partial-claim prevention, cancellation-vs-allocation race handling, allocator crash recovery |
 | **Tournaments** | Immutable bracket revisions, idempotent bracket advancement |
 | **Moderation and audit** | Report and sanction workflow, audit events, admin route separation |
+| **Content catalog** | Versioned, typed catalog of maps, weapons (with ballistics), characters, throwables, equipment, and game modes; every match pins to a catalog version |
 | **Identity** | JWKS-validated JWTs, concurrent first-login safety, identity linking, account-status enforcement |
 | **Operations** | Migrations, deterministic seeding, index/validator/constraint verification, graceful shutdown, runbooks |
 
@@ -140,7 +142,31 @@ The database is seeded with a full, original-IP content catalog, showing it can 
 
 ### 🔫 Weapons (35)
 
-Five weapons per category, each with its own stats (damage, fire rate, headshot multiplier).
+Five weapons per category. Every weapon carries a full ballistics profile, not just a damage number.
+
+| Stat | Meaning |
+| :--- | :--- |
+| `damage`, `minDamage` | Body damage up close, and the floor reached at long range |
+| `falloffStartMeters`, `falloffEndMeters` | Where damage starts dropping and where it reaches `minDamage` |
+| `rangeMeters` | Maximum effective range |
+| `fireRate`, `isAutomatic` | Rounds per minute, and whether the weapon fires automatically |
+| `magazineSize`, `reloadTimeMs` | Ammo capacity and reload duration |
+| `headshotMultiplier` | Damage multiplier on headshots |
+| `recoilVertical`, `recoilHorizontal` | Recoil kick in degrees |
+| `spread` | Base inaccuracy in degrees |
+| `penetration` | 0 none, 1 low, 2 medium, 3 high |
+
+One representative weapon per category (full data lives in `src/domain/catalog/data.ts`):
+
+| Weapon | Type | Damage (min) | RPM | Mag | Reload | HS × | Range (falloff) | Recoil V/H | Spread | Pen |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **Wraith** | Assault Rifle | 36 (28) | 600 | 30 | 2.5s | 4.0 | 50m (20-40m) | 2.5 / 1.2 | 0.5 | 2 |
+| **Viper** | SMG | 27 (18) | 750 | 30 | 2.8s | 4.0 | 30m (10-25m) | 1.5 / 1.8 | 0.8 | 1 |
+| **Hammerfall** | Sniper | 115 (115) | 41 | 10 | 3.7s | 4.0 | 100m (no falloff) | 8.0 / 2.0 | 0.1 | 3 |
+| **Bulwark** | LMG | 35 (28) | 800 | 150 | 5.5s | 4.0 | 60m (30-55m) | 3.5 / 2.5 | 1.5 | 3 |
+| **Judge** | Pistol | 63 (48) | 267 | 7 | 2.2s | 4.0 | 25m (10-20m) | 2.5 / 1.0 | 0.6 | 2 |
+| **Thunder** | Shotgun | 26 (8) | 85 | 8 | 2.6s | 3.0 | 15m (5-12m) | 4.0 / 1.5 | 3.0 | 1 |
+| **Tactical Blade** | Melee | 55 (55) | 120 | n/a | n/a | n/a | 2m | none | 0 | 0 |
 
 | Category | Weapons |
 | :--- | :--- |
@@ -179,6 +205,31 @@ Matchmaking supports **Ranked** and **Unranked** buckets across four core modes.
 | **Free-for-All** | Solo (everyone vs everyone) | 1 | Ranked, Unranked |
 | **Bomb Defusal** | 5v5 | 7 | Ranked, Unranked |
 | **Battle Royale** | Solo, Duo, Trio, Squad (up to 5) | 1 | Ranked, Unranked |
+
+### Content model
+
+The catalog is a strictly typed domain model. Weapon stats, for example:
+
+```ts
+export interface WeaponStats {
+  damage: number;
+  fireRate: number;            // rounds per minute
+  magazineSize: number;
+  reloadTimeMs: number;
+  headshotMultiplier: number;
+  rangeMeters: number;
+  falloffStartMeters: number;
+  falloffEndMeters: number;
+  minDamage: number;
+  recoilVertical: number;      // degrees
+  recoilHorizontal: number;    // degrees
+  spread: number;              // degrees
+  penetration: number;         // 0-3
+  isAutomatic: boolean;
+}
+```
+
+Weapon types, throwable types, character roles, game modes, and matchmaking buckets are closed union types, so an invalid value fails at compile time rather than at runtime. Seed the catalog with `npm run seed:catalog`.
 
 ## Core guarantees
 
@@ -243,6 +294,7 @@ curl http://localhost:3000/health
 | `npm run test:integration` | Integration tests against Atlas |
 | `npm run ci` | What CI runs: typecheck + build + test |
 | `npm run seed -- --size=small` | Seed a deterministic dataset |
+| `npm run seed:catalog` | Seed the versioned content catalog |
 | `npm run verify:validators` | Verify collection JSON Schema validators |
 | `npm run verify:indexes` | Verify the index inventory matches the database |
 | `npm run verify:unique` | Verify unique constraints |
@@ -253,7 +305,7 @@ curl http://localhost:3000/health
 
 ## Testing
 
-The repository contains 103 tests across 42 files: 25 unit tests and 78 integration tests.
+The repository contains 99 tests across 42 files: 25 unit tests and 74 integration tests.
 
 ```bash
 npm test                  # Unit tests (fast, hermetic)
@@ -261,6 +313,8 @@ npm run test:integration  # Integration tests (requires Atlas)
 ```
 
 > Integration tests need a valid `MONGODB_URI` in `.env` and run heavy concurrent operations against your Atlas cluster. Use a dedicated or disposable cluster, not data you care about.
+
+Catalog tests assert exact content counts (10 maps, 35 weapons, 25 characters, 8 throwables, 13 equipment items, 4 game modes), five weapons per type, five characters per role, complete ballistics on every weapon, and game-mode rules such as the 7-round 5v5 Bomb Defusal.
 
 Coverage includes concurrent duplicate submission, transaction rollback via failure injection, lost-ACK recovery, worker crash recovery, sequence ordering, matchmaking races, bracket idempotency, and authorization boundaries.
 

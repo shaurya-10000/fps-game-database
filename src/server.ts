@@ -7,6 +7,9 @@ import { CanonicalResultService } from "./domain/matches/canonical-service";
 import { PlayerService } from "./domain/players/player-service";
 import { FriendshipService } from "./domain/friends/friendship-service";
 import { buildFriendsRouter } from "./domain/friends/routes";
+import { createServer } from "http";
+import { ChatService } from "./domain/chat/service";
+import { initChatSocket } from "./domain/chat/socket";
 import { IdentityProvider } from "./infrastructure/auth/identity-provider";
 import { requirePlayer, Context } from "./infrastructure/auth/middleware";
 
@@ -16,6 +19,7 @@ const db = client.db("fps-game-database");
 const canonicalService = new CanonicalResultService(db);
 const playerService = new PlayerService(db);
 const friendshipService = new FriendshipService(db);
+const chatService = new ChatService(db);
 const authProvider = new IdentityProvider(env.AUTH_JWKS_URI, env.AUTH_ISSUER, env.AUTH_AUDIENCE);
 
 const app = express();
@@ -83,9 +87,15 @@ app.post("/internal/matches/:matchId/result", authMiddleware, async (req, res): 
 });
 
 export function startServer() {
-  const server = app.listen(env.PORT, () => {
-    logger.info(`Server listening on port ${env.PORT}`);
+  const server = createServer(app);
+  
+  // Initialize Socket.io
+  initChatSocket(server, chatService, authProvider, playerService);
+
+  server.listen(env.PORT, () => {
+    logger.info(`Server and Chat listening on port ${env.PORT}`);
   });
   return server;
 }
+
 

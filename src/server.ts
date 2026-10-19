@@ -5,6 +5,8 @@ import { getMongoClient } from "./infrastructure/mongodb/client";
 import { logger } from "./infrastructure/logging/logger";
 import { CanonicalResultService } from "./domain/matches/canonical-service";
 import { PlayerService } from "./domain/players/player-service";
+import { FriendshipService } from "./domain/friends/friendship-service";
+import { buildFriendsRouter } from "./domain/friends/routes";
 import { IdentityProvider } from "./infrastructure/auth/identity-provider";
 import { requirePlayer, Context } from "./infrastructure/auth/middleware";
 
@@ -13,6 +15,7 @@ const client = getMongoClient(env);
 const db = client.db("fps-game-database");
 const canonicalService = new CanonicalResultService(db);
 const playerService = new PlayerService(db);
+const friendshipService = new FriendshipService(db);
 const authProvider = new IdentityProvider(env.AUTH_JWKS_URI, env.AUTH_ISSUER, env.AUTH_AUDIENCE);
 
 const app = express();
@@ -38,7 +41,7 @@ const authMiddleware = async (req: express.Request, res: express.Response, next:
     const player = await playerService.resolvePlayer(principal);
     
     // Attach to request for the route handler
-    (req as any).ctx = { principal, player } as Context;
+    req.ctx = { principal, player } as Context;
     next();
   } catch (err) {
     logger.warn("Auth failed", { error: String(err) });
@@ -46,6 +49,8 @@ const authMiddleware = async (req: express.Request, res: express.Response, next:
     return;
   }
 };
+
+app.use(authMiddleware, buildFriendsRouter(friendshipService));
 
 // Match result endpoint (secured)
 app.post("/internal/matches/:matchId/result", authMiddleware, async (req, res): Promise<void> => {
@@ -83,3 +88,4 @@ export function startServer() {
   });
   return server;
 }
+

@@ -43,6 +43,14 @@ const inventory: IndexSpec[] = [
 
   // progressionEvents
   { collection: "progressionEvents", index: { playerId: 1, sourceEventId: 1 }, name: "playerId_1_sourceEventId_1", unique: true },
+
+  // friendships
+  { collection: "friendships", index: { fromPlayerId: 1, toPlayerId: 1 }, name: "from_1_to_1", unique: true },
+  { collection: "friendships", index: { fromPlayerId: 1, status: 1 }, name: "from_1_status_1" },
+  { collection: "friendships", index: { toPlayerId: 1, status: 1 }, name: "to_1_status_1" },
+
+  // blocks
+  { collection: "blocks", index: { blockerId: 1, blockedId: 1 }, name: "blocker_1_blocked_1", unique: true },
 ];
 
 async function verifyIndexes() {

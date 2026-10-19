@@ -27,16 +27,19 @@
     "verify:explain": "ts-node scripts/verify-explain.ts",
     "verify:unique": "ts-node scripts/verify-unique-indexes.ts",
     "verify:backup-restore": "ts-node scripts/verify-backup-restore.ts",
-    "load:test-service": "ts-node scripts/load-test-service.ts"
+    "load:test-service": "ts-node scripts/load-test-service.ts",
+    "start:worker": "ts-node src/worker.ts"
   },
   "dependencies": {
     "dotenv": "^18.0.8",
+    "express": "^5.3.0",
     "jose": "^6.2.12",
     "mongodb": "^7.7.0",
     "zod": "^3.24.1"
   },
   "devDependencies": {
     "@types/autocannon": "^7.12.7",
+    "@types/express": "^5.0.6",
     "@types/node": "^26.6.5",
     "autocannon": "^8.0.0",
     "ts-node": "^10.9.2",

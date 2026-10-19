@@ -1,40 +1,21 @@
 import "dotenv/config";
-import { loadEnv } from "./config/env";
-import { getMongoClient } from "./infrastructure/mongodb/client";
-import { logger, runWithLogContext } from "./infrastructure/logging/logger";
-import { PlayerService } from "./domain/players/player-service";
-import { requirePlayer } from "./infrastructure/auth/middleware";
+import { startServer } from "./server";
+import { runWorker } from "./worker";
+import { logger } from "./infrastructure/logging/logger";
 
-// Scope note: this milestone ships the service layer, not an HTTP server.
-// This entrypoint validates that all wiring loads cleanly (env, Mongo
-// client, services, auth middleware) and then exits. Workers, scripts,
-// and integration tests consume the same modules directly.
-//
-// If/when an HTTP server is added, it should be started here, and this
-// comment should be deleted rather than kept alongside a real listener.
-async function main(): Promise<void> {
-  const env = loadEnv();
-  const bootId = `boot-${Date.now()}`;
+// Start the HTTP server
+startServer();
 
-  runWithLogContext({ requestId: bootId, traceId: bootId }, async () => {
-    try {
-      const client = getMongoClient(env);
-      const db = client.db("fps-game-database");
-      const playerService = new PlayerService(db);
-
-      logger.info("fps-game-database wiring validated", {
-        env: env.NODE_ENV,
-        mongoPoolSize: client.options.maxPoolSize,
-        hasPlayerService: !!playerService,
-        hasMiddleware: !!requirePlayer,
-      });
-
-      process.exit(0);
-    } catch (err: unknown) {
-      logger.error("boot failed", { err: String(err) });
-      process.exit(1);
-    }
+// Start the background worker
+if (process.env["RUN_WORKER"] === "true") {
+  runWorker().catch(err => {
+    logger.error("Worker failed", { error: String(err) });
+    process.exit(1);
   });
 }
 
-main();
+// Graceful shutdown
+process.on("SIGTERM", () => {
+  logger.info("SIGTERM received, shutting down...");
+  process.exit(0);
+});

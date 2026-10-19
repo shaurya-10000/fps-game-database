@@ -50,7 +50,13 @@ const authMiddleware = async (req: express.Request, res: express.Response, next:
 // Match result endpoint (secured)
 app.post("/internal/matches/:matchId/result", authMiddleware, async (req, res): Promise<void> => {
   try {
-    const matchId = req.params.matchId;
+    // Express types params as string | string[] | undefined
+    const rawMatchId = req.params["matchId"];
+    if (!rawMatchId || Array.isArray(rawMatchId)) {
+      res.status(400).json({ error: "Missing or invalid matchId parameter" });
+      return;
+    }
+    const matchId = rawMatchId as string;
     const idempotencyKey = req.header("X-Idempotency-Key");
     const fingerprint = req.header("X-Request-Fingerprint");
 

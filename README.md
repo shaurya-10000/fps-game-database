@@ -1,42 +1,84 @@
-# FPS Game Database
+<div align="center">
 
-Competitive FPS backend: canonical match recording, transactional outbox, ratings, matchmaking, tournaments, economy, and moderation.
+  # 🎮 FPS Game Database
 
-**Design thesis:** one transactional write path is the source of truth. Everything else (ratings, statistics, leaderboards) is a *projection* derived from events, and can be rebuilt, replayed, or repaired without touching canonical data.
+  **A production-grade, cloud-deployed backend for competitive FPS games.**
 
-## Scope & Milestone Status
+  Canonical match recording, transactional outbox, sequence-ordered Elo ratings, matchmaking, and moderation. Built for exactly-once data integrity, even under extreme network failure.
 
-This repository contains the **domain layer** of the backend. It is built for correctness and tested against a real MongoDB Atlas replica set.
+  [![CI](https://github.com/shaurya-10000/fps-game-database/actions/workflows/ci.yml/badge.svg)](https://github.com/shaurya-10000/fps-game-database/actions/workflows/ci.yml)
+  [![License](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
+  [![Node.js](https://img.shields.io/badge/Node.js-20.19+-green?logo=node.js)](https://nodejs.org)
+  [![MongoDB](https://img.shields.io/badge/MongoDB-Atlas-green?logo=mongodb)](https://www.mongodb.com/atlas)
+  [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org)
 
-**What is included:**
-- **Core Services:** `PlayerService`, `MatchService`, `CanonicalResultService`, `RatingProcessor`, `MatchmakingService`, `TournamentService`, `ModerationService`, `ProgressionService`, `InventoryService`, `LeaderboardService`, `SeasonService`, `MonitoringService`, `OutboxRelay`.
-- **Infrastructure:** MongoDB client, structured logger, JWKS-backed `IdentityProvider`, auth middleware, failure injection harness, migrations, and verification scripts.
-- **Content Catalog:** Versioned maps, weapons, characters, and game modes.
-- **Testing:** 92 passing tests (25 unit, 67 integration) verifying transactions, idempotency, and outbox processing.
+  [**Live API Health Check**](https://fps-game-database.onrender.com/health) · [**Report a bug**](https://github.com/shaurya-10000/fps-game-database/issues)
 
-**What is NOT included (by design for this milestone):**
-- An HTTP server. There is no route table or request pipeline.
-- A worker daemon. `OutboxRelay` and `RatingProcessor` are classes; something must instantiate and drive them.
-- Auth middleware wiring. Middleware exists; nothing calls it.
-- CI running integration tests (requires a replica set).
+</div>
 
-Adding an HTTP transport, a worker loop, and CI-with-Atlas is the natural next milestone. The correctness of the pipeline does not depend on that transport existing.
+---
 
-## Requirements
+## Contents
 
-- Node.js **>= 20.19.0**
-- npm **>= 10**
-- MongoDB **>= 7** running as a **replica set** (MongoDB Atlas is recommended).
+- [Highlights](#highlights)
+- [Architecture](#architecture)
+- [Core Guarantees](#core-guarantees)
+- [Tech stack](#tech-stack)
+- [Quick start](#quick-start)
+- [Testing](#testing)
+- [Deployment](#deployment)
+- [License](#license)
 
-## Quick Start
+## Highlights
 
-```bash
-cp .env.example .env        # Set MONGODB_URI to your Atlas connection string
-npm ci                      # Reproducible install
-npm run typecheck           # Strict typecheck
-npm run build               # Compile to dist/
-npm test                    # Unit tests
-npm run test:integration    # Integration tests (requires Atlas)
+- **Exactly-once semantics.** Match results are recorded precisely once, even if clients retry, networks drop ACKs, or workers crash mid-flight.
+- **Event-driven projections.** Ratings, XP, and leaderboards are derived asynchronously via a transactional outbox pattern. They can be rebuilt from scratch without touching canonical data.
+- **Strict ordering.** Per-player rating sequences are enforced atomically. Out-of-order events are deferred, duplicates are no-ops, and gaps block application until resolved.
+- **Zero-trust by design.** BOLA-safe responses (404 instead of 403), Zod-strict mass-assignment defense, and mid-session suspension enforcement.
+- **Fully deployed and secured.** The REST API is live on Render, connected to a managed MongoDB Atlas cluster, and guarded by JWT middleware.
+- **Battle-tested.** 92 passing tests (unit + integration) validating concurrency, failure injection, and state machines.
+
+## Architecture
+
+Canonical truth plus event-driven projections.
+
+```text
+Client (HTTP POST)
+       |
+       v
+[JWT Auth Middleware]
+       |
+       v
++-----------------------------------------------+
+|  Canonical Transaction (MongoDB)              |
+|  ---------------------------------            |
+|  matches (status: completed)                  |
+|  matchParticipants (N documents)              |
+|  outboxEvents (1 MATCH_COMPLETED)             |
+|  outboxDeliveries (1 per consumer)            |
+|  idempotencyRecords (fingerprint)             |
++-----------------------------------------------+
+       |
+       v
++-----------------------------------------------+
+|  Outbox Relay (lease-based claim)             |
+|  ---------------------------------            |
+|  Exponential backoff + jitter                 |
+|  Stale-worker protection                      |
+|  Dead-letter + replay script                  |
++-----------------------------------------------+
+       |
+       v
++-----------------------------------------------+
+|  Rating Processor (atomic)                    |
+|  ---------------------------------            |
+|  Per-player sequence allocation               |
+|  Strict ordering enforcement                  |
+|  Atomic: rating + event + delivery            |
++-----------------------------------------------+
+       |
+       v
+  competitiveRatings projection (read model)
 ```
 
 ## Core Guarantees
@@ -52,38 +94,73 @@ npm run test:integration    # Integration tests (requires Atlas)
 | Mass-assignment rejection at DB and API layer | Zod `.strict()` + `additionalProperties: false` |
 | Mid-session account suspension enforcement | High-risk route re-check test |
 
-## Architecture
+## Tech stack
 
-Canonical truth plus event-driven projections.
+| Layer | Choice |
+| --- | --- |
+| Runtime | [Node.js](https://nodejs.org) (>= 20.19.0) |
+| Language | [TypeScript](https://www.typescriptlang.org) (strict, no `any`) |
+| HTTP Server | [Express](https://expressjs.com) |
+| Database | [MongoDB Atlas](https://www.mongodb.com/atlas) (Replica Set) |
+| Validation | [Zod](https://zod.dev) (strict schemas) |
+| Auth | [jose](https://github.com/panva/jose) (JWKS, JWT) |
+| Testing | [Vitest](https://vitest.dev) |
+| CI/CD | GitHub Actions → Render |
 
-```text
-Canonical Transaction (ADR-001)
---------------------------------
-matches, matchParticipants, outboxEvents, idempotencyRecords
-        |
-        v
-Outbox Relay (lease-based claim)
-        |
-        v
-Rating Processor (atomic sequence allocation)
-        |
-        v
-competitiveRatings projection (read model)
+## Quick start
+
+**Prerequisites:** Node.js **20.19.0+**, npm, and a MongoDB Atlas cluster (replica set).
+
+```bash
+git clone https://github.com/shaurya-10000/fps-game-database.git
+cd fps-game-database
+npm install
+cp .env.example .env        # Add your Atlas URI
 ```
 
-## Scripts
+To run the API locally:
+```bash
+npm run dev
+```
+The server will start on `http://localhost:3000`. Verify it works:
+```bash
+curl http://localhost:3000/health
+# Output: {"status":"ok","env":"development"}
+```
 
-| Script | Purpose |
-|--------|---------|
-| `npm run build` | Compile `src/` to `dist/` |
-| `npm run typecheck` | Strict typecheck of all sources |
-| `npm test` | Unit tests (Vitest) |
-| `npm run test:integration` | Integration tests against a replica set |
-| `npm run seed` | Seed a deterministic dataset |
-| `npm run verify:indexes` | Verify index inventory matches the database |
-| `npm run migrate` | Run idempotent migrations |
-| `npm run replay:dead-letter` | Replay a dead-lettered delivery |
+## Testing
+
+The repository contains 92 tests split between pure logic and database integration.
+
+```bash
+npm test                 # Unit tests (fast, hermetic)
+npm run test:integration # Integration tests (requires Atlas)
+```
+
+*(Note: Integration tests require a valid `MONGODB_URI` in your `.env` file and will run heavy concurrent operations against your Atlas cluster).*
+
+## Deployment
+
+### Render (Production)
+
+The API is currently deployed as a Web Service on Render.
+1. Build Command: `npm install --include=dev && npm run build`
+2. Start Command: `npm start`
+3. Environment Variables: `MONGODB_URI`, `NODE_ENV=production`, `AUTH_JWKS_URI`, `AUTH_ISSUER`, `AUTH_AUDIENCE`.
+
+### Background Workers (Outbox Relay)
+
+By design, the HTTP server only handles canonical writes. The projection workers (`OutboxRelay`, `RatingProcessor`) are designed to run as a continuous background daemon.
+To process ratings in production, deploy a separate Render **Background Worker** (Starter plan) using the command: `npm run start:worker`.
 
 ## License
 
-MIT
+Released under the MIT license. See [LICENSE](./LICENSE).
+
+---
+
+<div align="center">
+
+Built by [shaurya-10000](https://github.com/shaurya-10000)
+
+</div>

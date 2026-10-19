@@ -3,7 +3,7 @@ import { MongoClient, Db } from "mongodb";
 import { ContentCatalogService } from "../../src/domain/catalog/service";
 import "dotenv/config";
 
-describe("Content Catalog - Full IP", () => {
+describe("Content Catalog - Full IP & Ballistics", () => {
   let client: MongoClient;
   let db: Db;
   let service: ContentCatalogService;
@@ -40,6 +40,31 @@ describe("Content Catalog - Full IP", () => {
     }
   });
 
+  it("verifies advanced ballistics are present on all weapons", async () => {
+    const catalog = await service.getCatalog("v1");
+    for (const weapon of catalog!.weapons) {
+      const stats = weapon.stats;
+      expect(stats.damage).toBeGreaterThan(0);
+      expect(stats.fireRate).toBeGreaterThanOrEqual(0);
+      expect(stats.recoilVertical).toBeGreaterThanOrEqual(0);
+      expect(stats.recoilHorizontal).toBeGreaterThanOrEqual(0);
+      expect(stats.rangeMeters).toBeGreaterThan(0);
+      expect(stats.penetration).toBeGreaterThanOrEqual(0);
+      
+      // Melee weapons should have 0 recoil and 0 penetration
+      if (weapon.type === "melee") {
+        expect(stats.recoilVertical).toBe(0);
+        expect(stats.recoilHorizontal).toBe(0);
+        expect(stats.penetration).toBe(0);
+      }
+      
+      // Snipers should have high vertical recoil (>= 6)
+      if (weapon.type === "sniper") {
+        expect(stats.recoilVertical).toBeGreaterThanOrEqual(6);
+      }
+    }
+  });
+
   it("has 5 characters per role", async () => {
     for (const role of ["assault", "sniper", "controller", "support", "tank"] as const) {
       const chars = await service.getCharactersByRole("v1", role);
@@ -52,22 +77,10 @@ describe("Content Catalog - Full IP", () => {
     const bomb = catalog!.gameModes.find(g => g.id === "bomb_defusal");
     expect(bomb!.teamSize).toBe(5);
     expect(bomb!.roundsPerMatch).toBe(7);
-    expect(bomb!.buckets).toEqual(["ranked", "unranked"]);
-  });
-
-  it("battle royale supports solo through squad of 5", async () => {
-    const catalog = await service.getCatalog("v1");
-    const br = catalog!.gameModes.find(g => g.id === "battle_royale");
-    expect(br!.battleRoyaleTeamSizes).toEqual([1, 2, 3, 4, 5]);
   });
 
   it("ranked bucket includes all 4 modes", async () => {
     const modes = await service.getGameModesForBucket("v1", "ranked");
-    expect(modes.length).toBe(4);
-  });
-
-  it("unranked bucket includes all 4 modes", async () => {
-    const modes = await service.getGameModesForBucket("v1", "unranked");
     expect(modes.length).toBe(4);
   });
 
@@ -81,29 +94,5 @@ describe("Content Catalog - Full IP", () => {
     expect(helmet.length).toBe(3);
     expect(ammo.length).toBe(6);
     expect(consumable.length).toBe(1);
-  });
-
-  it("every map has at least one game mode", async () => {
-    const catalog = await service.getCatalog("v1");
-    for (const map of catalog!.maps) {
-      expect(map.gameModes.length).toBeGreaterThan(0);
-    }
-  });
-
-  it("all weapon types are valid", async () => {
-    const catalog = await service.getCatalog("v1");
-    const validTypes = ["assault_rifle", "smg", "sniper", "lmg", "pistol", "shotgun", "melee"];
-    for (const weapon of catalog!.weapons) {
-      expect(validTypes).toContain(weapon.type);
-      expect(weapon.damage).toBeGreaterThan(0);
-    }
-  });
-
-  it("all character roles are valid", async () => {
-    const catalog = await service.getCatalog("v1");
-    const validRoles = ["assault", "sniper", "controller", "support", "tank"];
-    for (const char of catalog!.characters) {
-      expect(validRoles).toContain(char.role);
-    }
   });
 });

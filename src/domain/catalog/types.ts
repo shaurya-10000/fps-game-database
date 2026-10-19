@@ -15,17 +15,29 @@ export type GameModeId =
 
 export type MatchmakingBucket = "ranked" | "unranked";
 
-export interface Weapon {
-  id: string;
-  name: string;
-  type: WeaponType;
+export interface WeaponStats {
   damage: number;
   fireRate: number;
   magazineSize: number;
   reloadTimeMs: number;
-  price: number;
-  isAutomatic: boolean;
   headshotMultiplier: number;
+  rangeMeters: number;
+  falloffStartMeters: number;
+  falloffEndMeters: number;
+  minDamage: number;
+  recoilVertical: number;
+  recoilHorizontal: number;
+  spread: number;
+  penetration: number;
+  isAutomatic: boolean;
+}
+
+export interface Weapon {
+  id: string;
+  name: string;
+  type: WeaponType;
+  price: number;
+  stats: WeaponStats;
 }
 
 export interface Throwable {

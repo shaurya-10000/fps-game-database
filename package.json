@@ -1,0 +1,46 @@
+{
+  "name": "fps-game-database",
+  "version": "0.1.0",
+  "private": true,
+  "description": "FPS game backend — canonical match results, outbox, ratings, matchmaking, tournaments.",
+  "license": "UNLICENSED",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=20.19.0",
+    "npm": ">=10.0.0"
+  },
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "ci": "npm run typecheck && npm run build && npm test",
+    "seed": "ts-node scripts/seed.ts",
+    "verify:validators": "ts-node scripts/verify-validators.ts",
+    "verify:indexes": "ts-node scripts/verify-indexes.ts",
+    "migrate": "ts-node src/infrastructure/mongodb/migrations/runner.ts",
+    "replay:dead-letter": "ts-node scripts/replay-dead-letter.ts",
+    "verify:explain": "ts-node scripts/verify-explain.ts",
+    "verify:unique": "ts-node scripts/verify-unique-indexes.ts",
+    "verify:backup-restore": "ts-node scripts/verify-backup-restore.ts",
+    "load:test-service": "ts-node scripts/load-test-service.ts"
+  },
+  "dependencies": {
+    "dotenv": "^18.0.8",
+    "jose": "^6.2.12",
+    "mongodb": "^7.7.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/autocannon": "^7.12.7",
+    "@types/node": "^26.6.5",
+    "autocannon": "^8.0.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^6.0.3",
+    "vitest": "^3.0.5"
+  }
+}

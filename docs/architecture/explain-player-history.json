@@ -1,0 +1,176 @@
+{
+  "explainVersion": "1",
+  "queryPlanner": {
+    "namespace": "fps-game-database.matchParticipants",
+    "parsedQuery": {
+      "playerId": {
+        "$eq": "player_0"
+      }
+    },
+    "indexFilterSet": false,
+    "queryHash": "4A6F5976",
+    "planCacheShapeHash": "4A6F5976",
+    "planCacheKey": "177777A5",
+    "optimizationTimeMillis": 0,
+    "maxIndexedOrSolutionsReached": false,
+    "maxIndexedAndSolutionsReached": false,
+    "maxScansToExplodeReached": false,
+    "prunedSimilarIndexes": false,
+    "winningPlan": {
+      "isCached": false,
+      "stage": "LIMIT",
+      "limitAmount": 10,
+      "inputStage": {
+        "stage": "FETCH",
+        "inputStage": {
+          "stage": "IXSCAN",
+          "keyPattern": {
+            "playerId": 1,
+            "createdAt": -1
+          },
+          "indexName": "playerId_1_createdAt_-1",
+          "isMultiKey": false,
+          "multiKeyPaths": {
+            "playerId": [],
+            "createdAt": []
+          },
+          "isUnique": false,
+          "isSparse": false,
+          "isPartial": false,
+          "indexVersion": 2,
+          "direction": "forward",
+          "indexBounds": {
+            "playerId": [
+              "[\"player_0\", \"player_0\"]"
+            ],
+            "createdAt": [
+              "[MaxKey, MinKey]"
+            ]
+          }
+        }
+      }
+    },
+    "rejectedPlans": []
+  },
+  "executionStats": {
+    "executionSuccess": true,
+    "nReturned": 10,
+    "executionTimeMillis": 1,
+    "totalKeysExamined": 10,
+    "totalDocsExamined": 10,
+    "executionStages": {
+      "isCached": false,
+      "stage": "LIMIT",
+      "nReturned": 10,
+      "executionTimeMillisEstimate": 0,
+      "works": 11,
+      "advanced": 10,
+      "needTime": 0,
+      "needYield": 0,
+      "saveState": 0,
+      "restoreState": 0,
+      "isEOF": 1,
+      "limitAmount": 10,
+      "inputStage": {
+        "stage": "FETCH",
+        "nReturned": 10,
+        "executionTimeMillisEstimate": 0,
+        "works": 10,
+        "advanced": 10,
+        "needTime": 0,
+        "needYield": 0,
+        "saveState": 0,
+        "restoreState": 0,
+        "isEOF": 0,
+        "docsExamined": 10,
+        "alreadyHasObj": 0,
+        "inputStage": {
+          "stage": "IXSCAN",
+          "nReturned": 10,
+          "executionTimeMillisEstimate": 0,
+          "works": 10,
+          "advanced": 10,
+          "needTime": 0,
+          "needYield": 0,
+          "saveState": 0,
+          "restoreState": 0,
+          "isEOF": 0,
+          "keyPattern": {
+            "playerId": 1,
+            "createdAt": -1
+          },
+          "indexName": "playerId_1_createdAt_-1",
+          "isMultiKey": false,
+          "multiKeyPaths": {
+            "playerId": [],
+            "createdAt": []
+          },
+          "isUnique": false,
+          "isSparse": false,
+          "isPartial": false,
+          "indexVersion": 2,
+          "direction": "forward",
+          "indexBounds": {
+            "playerId": [
+              "[\"player_0\", \"player_0\"]"
+            ],
+            "createdAt": [
+              "[MaxKey, MinKey]"
+            ]
+          },
+          "keysExamined": 10,
+          "seeks": 1,
+          "dupsTested": 0,
+          "dupsDropped": 0
+        }
+      }
+    }
+  },
+  "queryShapeHash": "6E881911764C4F27A7DE6E93E9987EE494AA67AA23BC47ED74EB490AE5DBC2D4",
+  "command": {
+    "find": "matchParticipants",
+    "filter": {
+      "playerId": "player_0"
+    },
+    "sort": {
+      "createdAt": -1
+    },
+    "limit": 10,
+    "$db": "fps-game-database"
+  },
+  "serverInfo": {
+    "host": "ac-shtlne8-shard-00-01.xwkc4v7.mongodb.net",
+    "port": 27017,
+    "version": "8.0.34",
+    "gitVersion": "51db4515a6597aedcf6188ee4e48a27e65b065ae"
+  },
+  "serverParameters": {
+    "internalQueryFacetBufferSizeBytes": 104857600,
+    "internalQueryFacetMaxOutputDocSizeBytes": 104857600,
+    "internalLookupStageIntermediateDocumentMaxSizeBytes": 16793600,
+    "internalDocumentSourceGroupMaxMemoryBytes": 104857600,
+    "internalQueryMaxBlockingSortMemoryUsageBytes": 33554432,
+    "internalQueryProhibitBlockingMergeOnMongoS": 0,
+    "internalQueryMaxAddToSetBytes": 104857600,
+    "internalDocumentSourceSetWindowFieldsMaxMemoryBytes": 104857600,
+    "internalQueryFrameworkControl": "trySbeRestricted",
+    "internalQueryPlannerIgnoreIndexWithCollationForRegex": 1
+  },
+  "ok": 1,
+  "$clusterTime": {
+    "clusterTime": {
+      "$timestamp": "7698248030721409027"
+    },
+    "signature": {
+      "hash": "C+/IPBmJboheJWCAlXbFMfZCvIc=",
+      "keyId": {
+        "high": 1783623837,
+        "low": 15,
+        "unsigned": false
+      }
+    }
+  },
+  "operationTime": {
+    "$timestamp": "7698248030721409027"
+  }
+}

@@ -1,18 +1,19 @@
 <div align="center">
 
-  # 🎮 FPS Game Database
+# 🎮 FPS Game Database
 
-  **A cloud-deployed backend for competitive FPS games.**
+**A cloud-deployed backend for competitive FPS games.**
 
-  Canonical match recording, transactional outbox, sequence-ordered Elo ratings, matchmaking, tournaments, and moderation, built so every match result is recorded once and only once, even when networks and workers fail.
+Canonical match recording, transactional outbox, sequence-ordered Elo ratings, matchmaking, tournaments, moderation, and real-time communications (chat, friends, WebRTC calls), built so every match result is recorded once and only once, even when networks and workers fail.
 
-  [![CI](https://github.com/shaurya-10000/fps-game-database/actions/workflows/ci.yml/badge.svg)](https://github.com/shaurya-10000/fps-game-database/actions/workflows/ci.yml)
-  [![License](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
-  [![Node.js](https://img.shields.io/badge/Node.js-20.19+-green?logo=node.js)](https://nodejs.org)
-  [![MongoDB](https://img.shields.io/badge/MongoDB-Atlas-green?logo=mongodb)](https://www.mongodb.com/atlas)
-  [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org)
+[![CI](https://github.com/shaurya-10000/fps-game-database/actions/workflows/ci.yml/badge.svg)](https://github.com/shaurya-10000/fps-game-database/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
+[![Node.js](https://img.shields.io/badge/Node.js-20.19+-green?logo=node.js)](https://nodejs.org)
+[![MongoDB](https://img.shields.io/badge/MongoDB-Atlas-green?logo=mongodb)](https://www.mongodb.com/atlas)
+[![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org)
+[![Socket.io](https://img.shields.io/badge/Socket.io-4.0+-black?logo=socket.io)](https://socket.io)
 
-  [**Live API Health Check**](https://fps-game-database.onrender.com/health) · [**Report a bug**](https://github.com/shaurya-10000/fps-game-database/issues)
+[**Live API Health Check**](https://fps-game-database.onrender.com/health) · [**Report a bug**](https://github.com/shaurya-10000/fps-game-database/issues)
 
 </div>
 
@@ -39,16 +40,17 @@
 
 - **Exactly-once effect.** Match results are recorded once, even if clients retry, networks drop acknowledgements, or workers crash mid-flight.
 - **Event-driven projections.** Ratings, XP, and leaderboards are derived asynchronously through a transactional outbox. They can be rebuilt from scratch without touching canonical data.
+- **Real-time communications.** Socket.io handles authenticated, bi-directional WebSocket connections for Global, Region, Group, and DM chat, and acts as a signaling relay for peer-to-peer WebRTC voice and video calls.
 - **Strict ordering.** Per-player rating sequences are enforced atomically. Out-of-order events are deferred, duplicates are no-ops, and gaps block application until resolved.
-- **Security by design.** BOLA-safe responses (404 instead of 403), Zod-strict mass-assignment defense, JWT verification against a JWKS, and mid-session suspension enforcement.
+- **Security by design.** BOLA-safe responses (404 instead of 403), Zod-strict mass-assignment defense, JWT verification against a JWKS, socket-level JWT authentication, and mid-session suspension enforcement.
 - **Typed game content model.** Maps, weapons with full ballistics, characters, throwables, equipment, and game modes are strictly typed TypeScript domain models, seeded into versioned catalogs that matches pin to.
-- **Deployed and running.** The REST API runs on Render against a managed MongoDB Atlas cluster. Background workers run separately from the HTTP server.
-- **Tested against a real database.** 99 passing tests (25 unit, 74 integration) cover concurrency, failure injection, crash recovery, and state machines. Integration tests use real MongoDB transactions, not mocks.
+- **Deployed and running.** The REST API and WebSocket server run on Render against a managed MongoDB Atlas cluster. Background workers run separately from the HTTP server.
+- **Tested against a real database.** 106 passing tests (24 unit, 82 integration) cover concurrency, failure injection, crash recovery, social graph race conditions, and state machines. Integration tests use real MongoDB transactions, not mocks.
 
 ## Features
 
 | Area | What it does |
-|------|--------------|
+| :--- | :--- |
 | **Canonical match results** | Versioned content catalog, match lifecycle state machine, idempotent result submission, ambiguous-commit resolution |
 | **Outbox and consumers** | Lease-based claiming, exponential backoff with jitter, dead-lettering with replay, backpressure monitoring |
 | **Competitive ratings** | Elo rating algorithm, tier derivation, audited rating corrections, season lifecycle |
@@ -56,70 +58,98 @@
 | **Matchmaking** | Ticket state machine, atomic allocation, partial-claim prevention, cancellation-vs-allocation race handling, allocator crash recovery |
 | **Tournaments** | Immutable bracket revisions, idempotent bracket advancement |
 | **Moderation and audit** | Report and sanction workflow, audit events, admin route separation |
+| **Social graph** | Friendships with mutual auto-accept, directional blocking (dominant over friendships), BOLA-safe error surfaces, in-flight request caps |
+| **Real-time chat** | Authenticated WebSocket connections via Socket.io. Global, Region, and Group rooms, plus deterministic Direct Messages (DMs) |
+| **WebRTC signaling** | Backend relay for peer-to-peer voice and video calls. Handles Offer, Answer, ICE candidate exchange, and call termination |
 | **Content catalog** | Versioned, typed catalog of maps, weapons (with ballistics), characters, throwables, equipment, and game modes; every match pins to a catalog version |
 | **Identity** | JWKS-validated JWTs, concurrent first-login safety, identity linking, account-status enforcement |
 | **Operations** | Migrations, deterministic seeding, index/validator/constraint verification, graceful shutdown, runbooks |
 
 ## Architecture
 
-Canonical truth plus event-driven projections.
+Canonical truth, event-driven projections, and real-time communications.
+
+```mermaid
+flowchart TD
+    C["Client<br/>(HTTP POST / WebSocket)"] --> A["JWT auth middleware<br/>Socket.io middleware"]
+
+    A --> T["Canonical transaction (MongoDB)<br/>matches, matchParticipants, outboxEvents,<br/>outboxDeliveries, idempotencyRecords"]
+    A --> R["Real-time chat (Socket.io)<br/>chatRooms, chatMessages,<br/>WebRTC signaling relay"]
+
+    R -.-> P2P["Peer-to-peer audio / video"]
+
+    T --> O["Outbox relay<br/>lease-based claim, backoff + jitter,<br/>stale-worker fencing, dead-letter + replay"]
+    O --> RP["Rating processor (atomic)<br/>per-player sequence, strict ordering,<br/>rating + event + delivery in one write"]
+    RP --> V[("competitiveRatings<br/>projection (read model)")]
+```
+
+<details>
+<summary>Plain-text version of the diagram</summary>
 
 ```text
-Client (HTTP POST)
+Client (HTTP POST / WebSocket)
        |
        v
-[JWT Auth Middleware]
+[JWT Auth Middleware / Socket.io Middleware]
+       |
+       +---------------------------------------+
+       |                                       |
+       v                                       v
++---------------------------------------+  +---------------------------------------+
+|  Canonical Transaction (MongoDB)      |  |  Real-time Chat (Socket.io)           |
+|  ---------------------------------    |  |  ---------------------------------    |
+|  matches (status: completed)          |  |  chatRooms (global, region, group)    |
+|  matchParticipants (N documents)      |  |  chatMessages (indexed by room/time)  |
+|  outboxEvents (1 MATCH_COMPLETED)     |  |  WebRTC Signaling (P2P relay)         |
+|  outboxDeliveries (1 per consumer)    |  +---------------------------------------+
+|  idempotencyRecords (fingerprint)     |                      |
++---------------------------------------+                      v
+       |                                             Peer-to-Peer Audio/Video
+       v
++---------------------------------------+
+|  Outbox Relay (lease-based claim)     |
+|  ---------------------------------    |
+|  Exponential backoff + jitter         |
+|  Stale-worker protection              |
+|  Dead-letter + replay script          |
++---------------------------------------+
        |
        v
-+-----------------------------------------------+
-|  Canonical Transaction (MongoDB)              |
-|  ---------------------------------            |
-|  matches (status: completed)                  |
-|  matchParticipants (N documents)              |
-|  outboxEvents (1 MATCH_COMPLETED)             |
-|  outboxDeliveries (1 per consumer)            |
-|  idempotencyRecords (fingerprint)             |
-+-----------------------------------------------+
-       |
-       v
-+-----------------------------------------------+
-|  Outbox Relay (lease-based claim)             |
-|  ---------------------------------            |
-|  Exponential backoff + jitter                 |
-|  Stale-worker protection                      |
-|  Dead-letter + replay script                  |
-+-----------------------------------------------+
-       |
-       v
-+-----------------------------------------------+
-|  Rating Processor (atomic)                    |
-|  ---------------------------------            |
-|  Per-player sequence allocation               |
-|  Strict ordering enforcement                  |
-|  Atomic: rating + event + delivery            |
-+-----------------------------------------------+
++---------------------------------------+
+|  Rating Processor (atomic)            |
+|  ---------------------------------    |
+|  Per-player sequence allocation       |
+|  Strict ordering enforcement          |
+|  Atomic: rating + event + delivery    |
++---------------------------------------+
        |
        v
   competitiveRatings projection (read model)
 ```
 
+</details>
+
 ### Design principles
 
 1. **One transactional write path.** A match result, its participants, its outbox event, its per-consumer deliveries, and its idempotency record commit together or not at all.
-2. **Projections are disposable.** Read models can be rebuilt from canonical data.
-3. **At-least-once delivery, exactly-once effect.** The relay may redeliver; consumers are idempotent and enforce ordering.
-4. **Fail closed.** Unknown fields are rejected, unauthorized access looks like absence, and ambiguous states are resolved explicitly.
+2. **Real-time is stateless.** Chat messages are persisted, but WebRTC call signaling is relayed in-memory for maximum speed and minimal database load.
+3. **Projections are disposable.** Read models can be rebuilt from canonical data.
+4. **At-least-once delivery, exactly-once effect.** The relay may redeliver; consumers are idempotent and enforce ordering.
+5. **Fail closed.** Unknown fields are rejected, unauthorized access looks like absence, and ambiguous states are resolved explicitly.
 
 ### Failure model
 
 | Failure | Behavior |
-|---------|----------|
+| :--- | :--- |
 | Concurrent duplicate submission | One canonical record; others resolve through the idempotency record |
 | Error inside the transaction | Full rollback, no partial state |
 | Commit succeeds but the ACK is lost | Retry resolves to the committed result |
 | Relay worker crashes mid-delivery | Lease expires, another worker claims; the stale worker is fenced out |
 | Consumer keeps failing | Backoff with jitter, then dead-letter; replay with a script |
 | Rating event arrives out of order | Gap detected; application deferred until order is restored |
+| Concurrent friend accept | Unique index on reverse direction ensures exactly one pair is created |
+| Socket connection drops | Client auto-reconnects via Socket.io, re-authenticates, and rejoins rooms |
+| WebRTC target offline | Signaling event is dropped; client times out waiting for Answer |
 
 ## Game content catalog
 
@@ -234,7 +264,7 @@ Weapon types, throwable types, character roles, game modes, and matchmaking buck
 ## Core guarantees
 
 | Guarantee | How it is proven |
-|-----------|------------------|
+| :--- | :--- |
 | Zero duplicate canonical records under concurrent submission | 20-parallel test (`duplicate-load.test.ts`) |
 | Full transaction rollback on any failure point | Failure injection (`canonical-result.test.ts`) |
 | Ambiguous commit resolution (network drops ACK) | `ambiguous-commit.test.ts` |
@@ -243,14 +273,17 @@ Weapon types, throwable types, character roles, game modes, and matchmaking buck
 | BOLA protection (404, not 403, on unauthorized) | `auth-middleware.test.ts` |
 | Mass-assignment rejection at DB and API layer | Zod `.strict()` + `additionalProperties: false` |
 | Mid-session account suspension enforcement | High-risk route re-check test |
+| Exactly-once friendship creation under concurrent accept | `friends.test.ts` |
+| Block prevents future requests in both directions | `friends.test.ts` |
 
 ## Tech stack
 
 | Layer | Choice |
-| --- | --- |
+| :--- | :--- |
 | Runtime | [Node.js](https://nodejs.org) (>= 20.19.0) |
 | Language | [TypeScript](https://www.typescriptlang.org) (strict, no `any`) |
 | HTTP server | [Express](https://expressjs.com) |
+| Real-time | [Socket.io](https://socket.io) (chat and WebRTC signaling) |
 | Database | [MongoDB Atlas](https://www.mongodb.com/atlas) (replica set) |
 | Validation | [Zod](https://zod.dev) (strict schemas) |
 | Auth | [jose](https://github.com/panva/jose) (JWKS, JWT) |
@@ -284,7 +317,7 @@ curl http://localhost:3000/health
 ## Scripts
 
 | Script | Purpose |
-|--------|---------|
+| :--- | :--- |
 | `npm run dev` | Start the API in development mode |
 | `npm run build` | Compile `src/` to `dist/` |
 | `npm start` | Run the compiled API |
@@ -305,18 +338,19 @@ curl http://localhost:3000/health
 
 ## Testing
 
-The repository contains 99 tests across 42 files: 25 unit tests and 74 integration tests.
+The repository contains 106 tests across 42 files: 24 unit tests and 82 integration tests.
 
 ```bash
 npm test                  # Unit tests (fast, hermetic)
 npm run test:integration  # Integration tests (requires Atlas)
 ```
 
+> [!WARNING]
 > Integration tests need a valid `MONGODB_URI` in `.env` and run heavy concurrent operations against your Atlas cluster. Use a dedicated or disposable cluster, not data you care about.
 
 Catalog tests assert exact content counts (10 maps, 35 weapons, 25 characters, 8 throwables, 13 equipment items, 4 game modes), five weapons per type, five characters per role, complete ballistics on every weapon, and game-mode rules such as the 7-round 5v5 Bomb Defusal.
 
-Coverage includes concurrent duplicate submission, transaction rollback via failure injection, lost-ACK recovery, worker crash recovery, sequence ordering, matchmaking races, bracket idempotency, and authorization boundaries.
+Coverage includes concurrent duplicate submission, transaction rollback via failure injection, lost-ACK recovery, worker crash recovery, sequence ordering, matchmaking races, bracket idempotency, concurrent friend accept, directional blocking, and authorization boundaries.
 
 ## Deployment
 
@@ -328,7 +362,8 @@ The API runs as a Web Service on Render.
 2. Start command: `npm start`
 3. Environment variables: `MONGODB_URI`, `NODE_ENV=production`, `AUTH_JWKS_URI`, `AUTH_ISSUER`, `AUTH_AUDIENCE`
 
-If the instance has been idle, the first request to the live health check may take a while to respond.
+> [!NOTE]
+> If the instance has been idle, the first request to the live health check may take a while to respond.
 
 ### Background worker (outbox relay)
 
@@ -341,7 +376,7 @@ npm run start:worker
 ## Operations and documentation
 
 | Document | Purpose |
-|----------|---------|
+| :--- | :--- |
 | [`threat-model.md`](docs/threat-model/threat-model.md) | Security boundaries and accepted risks |
 | [`security-review.md`](docs/security/security-review.md) | OWASP API Top 10 coverage |
 | [`index-inventory.md`](docs/architecture/index-inventory.md) | Every index, justified |
@@ -356,7 +391,9 @@ npm run start:worker
 ## Security
 
 - JWTs are verified against a JWKS with issuer, audience, and expiry checks.
+- WebSocket connections are authenticated using the same JWT middleware as HTTP.
 - Unauthorized access to another player's resources returns 404, not 403, to avoid leaking existence.
+- Blocking a player hides your presence from them and prevents future friend requests or DMs.
 - Request bodies use strict schemas (unknown fields rejected), with matching validators at the database layer.
 - High-risk routes re-check account status, so suspensions apply mid-session.
 - Admin routes are separated and audited.
@@ -366,13 +403,15 @@ To report a vulnerability, please use GitHub's private vulnerability reporting o
 ## Troubleshooting
 
 | Symptom | Likely cause | Fix |
-|---------|--------------|-----|
+| :--- | :--- | :--- |
 | "Transaction numbers are only allowed on a replica set member" | MongoDB running standalone | Use MongoDB Atlas (replica set by default) |
 | Integration tests fail to connect | Wrong or missing `MONGODB_URI` | Check `.env` against `.env.example`; allow your IP in Atlas network access |
 | `npm install` fails on engine check | Node older than 20.19.0 | Upgrade Node |
 | `verify:indexes` reports drift | Migration not applied | Run `npm run migrate`, then re-verify |
 | Ratings never update in a deployment | Worker not running | Start the background worker (`npm run start:worker`) |
 | Deliveries stuck in dead-letter | Persistent consumer failure | Fix the root cause, then `npm run replay:dead-letter <id>` |
+| Chat connects but no messages appear | Client not emitting `join_room` | Ensure the client joins `global_chat` or the correct DM room ID |
+| WebRTC call fails to connect | STUN/TURN server unreachable | Check client ICE configuration; ensure both peers are online |
 
 ## License
 

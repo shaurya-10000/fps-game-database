@@ -4,6 +4,8 @@ import { getMongoClient } from "./infrastructure/mongodb/client";
 import { logger } from "./infrastructure/logging/logger";
 import { OutboxRelay } from "./infrastructure/outbox/relay";
 import { RatingProcessor, RatingEvent } from "./domain/matches/rating-processor";
+import { ProgressionService } from "./domain/progression/progression-service";
+import { MatchResultPayload } from "./domain/matches/canonical-service";
 
 const env = loadEnv();
 const client = getMongoClient(env);
@@ -12,6 +14,7 @@ const db = client.db("fps-game-database");
 const workerId = `worker-${process.pid}`;
 const relay = new OutboxRelay(db, workerId);
 const ratingProcessor = new RatingProcessor(db);
+const progressionService = new ProgressionService(db);
 
 interface Delivery {
   _id: string;
@@ -19,18 +22,19 @@ interface Delivery {
   eventId: string;
 }
 
+interface OutboxEvent {
+  _id: string;
+  payload: MatchResultPayload;
+}
+
 async function processDelivery(delivery: Delivery): Promise<void> {
   switch (delivery.consumer) {
     case "rating": {
-      // ratingEvents._id is a string ("evt_<uuid>"), not an ObjectId,
-      // so the collection must be typed to tell the driver the _id shape.
       const event = await db
         .collection<{ _id: string } & RatingEvent>("ratingEvents")
         .findOne({ _id: delivery.eventId });
 
       if (!event) {
-        // Event ledger already contains this event from a prior attempt.
-        // The delivery just needs to complete — this is the recovery path.
         logger.warn("Rating event missing from ledger; completing delivery as no-op", {
           deliveryId: delivery._id,
           eventId: delivery.eventId,
@@ -40,16 +44,25 @@ async function processDelivery(delivery: Delivery): Promise<void> {
       await ratingProcessor.processEvent(delivery._id, event, workerId);
       return;
     }
-    case "progression":
+    case "progression": {
+      const event = await db
+        .collection<OutboxEvent>("outboxEvents")
+        .findOne({ _id: delivery.eventId });
+
+      if (!event) {
+        logger.warn("Outbox event missing for progression", { eventId: delivery.eventId });
+        return;
+      }
+
+      const payload = event["payload"];
+      
+      for (const participant of payload.participants) {
+        await progressionService.awardMatchXp(participant, payload.gameModeId);
+      }
+      return;
+    }
     case "statistics":
-      // Non-rating consumers are wired as no-op acknowledgements in this
-      // milestone. Projections for these are rebuilt by
-      // scripts/rebuild-projections.ts. When a live projection is added,
-      // route here and stop completing blindly.
-      logger.info("Delivery acknowledged by no-op consumer", {
-        deliveryId: delivery._id,
-        consumer: delivery.consumer,
-      });
+      logger.info("Delivery acknowledged by no-op consumer", { deliveryId: delivery._id, consumer: delivery.consumer });
       return;
     default:
       throw new Error(`Unknown consumer: ${delivery.consumer}`);

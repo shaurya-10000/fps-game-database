@@ -27,7 +27,7 @@ async function runServiceLoadTest() {
       updatedAt: new Date()
     });
     await service.acceptResult(
-      { matchId: warmId, participants: [{ playerId: "p1", team: "terrorist", score: 100 }] },
+      { matchId: warmId, gameModeId: "team_deathmatch", participants: [{ playerId: "p1", team: "terrorist", score: 100, kills: 10, deaths: 5, damage: 500, survivalTimeSeconds: 0 }] },
       `warm-key-${i}`,
       `warm-fp-${i}`
     );
@@ -49,7 +49,7 @@ async function runServiceLoadTest() {
 
     const start = Date.now();
     await service.acceptResult(
-      { matchId, participants: [{ playerId: "p1", team: "terrorist", score: 100 }] },
+      { matchId, gameModeId: "team_deathmatch", participants: [{ playerId: "p1", team: "terrorist", score: 100, kills: 10, deaths: 5, damage: 500, survivalTimeSeconds: 0 }] },
       `lt-key-${i}`,
       `lt-fp-${i}`
     );
@@ -81,3 +81,4 @@ runServiceLoadTest().catch((err) => {
   console.error(err);
   process.exit(1);
 });
+

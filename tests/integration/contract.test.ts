@@ -36,7 +36,7 @@ describe("CanonicalResultService - 3.7 Contract Tests", () => {
 
     const payload: MatchResultPayload = {
       matchId,
-      participants: [{ playerId: "p1", team: "terrorist", score: 100 }]
+      gameModeId: "team_deathmatch", participants: [{ playerId: "p1", team: "terrorist", score: 100, kills: 10, deaths: 5, damage: 500, survivalTimeSeconds: 0 }]
     };
 
     const response = await service.acceptResult(payload, "contract-key-1", "contract-fp-1");
@@ -63,3 +63,4 @@ describe("CanonicalResultService - 3.7 Contract Tests", () => {
     expect(parseResult.success).toBe(false);
   });
 });
+

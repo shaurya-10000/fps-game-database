@@ -11,9 +11,9 @@ describe("CanonicalResultService - 3.4 Idempotency", () => {
   
   const payload: MatchResultPayload = {
     matchId: "", 
-    participants: [
-      { playerId: "p1", team: "terrorist", score: 100 },
-      { playerId: "p2", team: "counter-terrorist", score: 50 }
+    gameModeId: "team_deathmatch", participants: [
+      { playerId: "p1", team: "terrorist", score: 100, kills: 10, deaths: 5, damage: 500, survivalTimeSeconds: 0 },
+      { playerId: "p2", team: "counter-terrorist", score: 50, kills: 10, deaths: 5, damage: 500, survivalTimeSeconds: 0 }
     ]
   };
 
@@ -80,3 +80,4 @@ describe("CanonicalResultService - 3.4 Idempotency", () => {
     expect(await db.collection("matchParticipants").countDocuments({ matchId })).toBe(2);
   });
 });
+

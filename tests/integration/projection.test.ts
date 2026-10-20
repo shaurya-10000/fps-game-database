@@ -42,7 +42,7 @@ describe("ProjectionService - 3.6 Projection Status", () => {
 
     const payload: MatchResultPayload = {
       matchId,
-      participants: [{ playerId: "p1", team: "terrorist", score: 100 }]
+      gameModeId: "team_deathmatch", participants: [{ playerId: "p1", team: "terrorist", score: 100, kills: 10, deaths: 5, damage: 500, survivalTimeSeconds: 0 }]
     };
 
     await service.acceptResult(payload, "proj-key-1", "proj-fp-1");
@@ -59,3 +59,4 @@ describe("ProjectionService - 3.6 Projection Status", () => {
     expect(updatedStatus.progression).toBe("pending");
   });
 });
+

@@ -74,7 +74,7 @@ app.post("/internal/matches/:matchId/result", authMiddleware, async (req, res): 
       return;
     }
 
-    const payload = { matchId, participants: req.body.participants };
+    const payload = { matchId, gameModeId: req.body.gameModeId, participants: req.body.participants };
     const result = await canonicalService.acceptResult(payload, idempotencyKey, fingerprint);
 
     res.status(200).json(result);
@@ -97,5 +97,7 @@ export function startServer() {
   });
   return server;
 }
+
+
 
 

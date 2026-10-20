@@ -25,3 +25,4 @@ coverage/
 .DS_Store
 .vscode/
 .idea/
+src/infrastructure/auth/keys/

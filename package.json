@@ -32,16 +32,20 @@
     "seed:catalog": "ts-node scripts/seed-content-catalog.ts"
   },
   "dependencies": {
+    "bcryptjs": "^3.0.3",
     "dotenv": "^18.0.8",
     "express": "^5.3.0",
     "jose": "^6.2.12",
+    "jsonwebtoken": "^9.0.3",
     "mongodb": "^7.7.0",
     "socket.io": "^4.8.4",
     "zod": "^3.24.1"
   },
   "devDependencies": {
     "@types/autocannon": "^7.12.7",
+    "@types/bcryptjs": "^2.4.6",
     "@types/express": "^5.0.6",
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^26.6.5",
     "@types/socket.io": "^3.0.1",
     "autocannon": "^8.0.0",

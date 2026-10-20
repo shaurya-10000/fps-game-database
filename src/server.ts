@@ -16,6 +16,8 @@ import { LeaderboardService } from "./domain/leaderboards/leaderboard-service";
 import { buildLeaderboardRouter } from "./domain/leaderboards/routes";
 import { IdentityProvider } from "./infrastructure/auth/identity-provider";
 import { Context } from "./infrastructure/auth/middleware";
+import { AuthService } from "./domain/auth/auth-service";
+import { buildAuthRouter } from "./domain/auth/routes";
 
 // New Imports for Username DMs
 import { DmResolver } from "./domain/chat/dm-resolver";
@@ -32,6 +34,7 @@ const chatService = new ChatService(db);
 const dmResolver = new DmResolver(db, chatService);
 const masteryService = new MasteryService(db);
 const leaderboardService = new LeaderboardService(db);
+const authService = new AuthService(db);
 const authProvider = new IdentityProvider(env.AUTH_JWKS_URI, env.AUTH_ISSUER, env.AUTH_AUDIENCE);
 
 const app = express();
@@ -65,6 +68,8 @@ const authMiddleware = async (req: express.Request, res: express.Response, next:
     return;
   }
 };
+
+app.use("/api", buildAuthRouter(authService));
 
 // Mount Routers
 app.use("/api", authMiddleware, buildFriendsRouter(friendshipService));

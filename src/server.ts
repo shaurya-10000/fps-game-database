@@ -11,6 +11,9 @@ import { buildFriendsRouter } from "./domain/friends/routes";
 import { ChatService } from "./domain/chat/service";
 import { initChatSocket } from "./domain/chat/socket";
 import { buildProgressionRouter } from "./domain/progression/routes";
+import { MasteryService } from "./domain/leaderboards/mastery-service";
+import { LeaderboardService } from "./domain/leaderboards/leaderboard-service";
+import { buildLeaderboardRouter } from "./domain/leaderboards/routes";
 import { IdentityProvider } from "./infrastructure/auth/identity-provider";
 import { Context } from "./infrastructure/auth/middleware";
 
@@ -27,6 +30,8 @@ const playerService = new PlayerService(db);
 const friendshipService = new FriendshipService(db);
 const chatService = new ChatService(db);
 const dmResolver = new DmResolver(db, chatService);
+const masteryService = new MasteryService(db);
+const leaderboardService = new LeaderboardService(db);
 const authProvider = new IdentityProvider(env.AUTH_JWKS_URI, env.AUTH_ISSUER, env.AUTH_AUDIENCE);
 
 const app = express();
@@ -65,6 +70,7 @@ const authMiddleware = async (req: express.Request, res: express.Response, next:
 app.use("/api", authMiddleware, buildFriendsRouter(friendshipService));
 app.use("/api", authMiddleware, buildProgressionRouter(db));
 app.use("/api", authMiddleware, buildChatRouter(dmResolver));
+app.use("/api", authMiddleware, buildLeaderboardRouter(leaderboardService));
 
 // Match result endpoint (secured)
 app.post("/internal/matches/:matchId/result", authMiddleware, async (req, res): Promise<void> => {
@@ -98,6 +104,7 @@ app.post("/internal/matches/:matchId/result", authMiddleware, async (req, res): 
 export function startServer() {
   const server = createServer(app);
   
+  masteryService.ensureIndexes().catch((err: unknown) => logger.error("Failed to init mastery indexes", { error: String(err) }));
   chatService.ensureIndexes().catch((err: unknown) => logger.error("Failed to init chat indexes", { error: String(err) }));
 
   initChatSocket(server, chatService, authProvider, playerService);
@@ -107,4 +114,5 @@ export function startServer() {
   });
   return server;
 }
+
 

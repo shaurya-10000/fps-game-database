@@ -1,5 +1,6 @@
 import express from "express";
 import "dotenv/config";
+import { createServer } from "http";
 import { loadEnv } from "./config/env";
 import { getMongoClient } from "./infrastructure/mongodb/client";
 import { logger } from "./infrastructure/logging/logger";
@@ -7,19 +8,25 @@ import { CanonicalResultService } from "./domain/matches/canonical-service";
 import { PlayerService } from "./domain/players/player-service";
 import { FriendshipService } from "./domain/friends/friendship-service";
 import { buildFriendsRouter } from "./domain/friends/routes";
-import { createServer } from "http";
 import { ChatService } from "./domain/chat/service";
 import { initChatSocket } from "./domain/chat/socket";
+import { buildProgressionRouter } from "./domain/progression/routes";
 import { IdentityProvider } from "./infrastructure/auth/identity-provider";
-import { requirePlayer, Context } from "./infrastructure/auth/middleware";
+import { Context } from "./infrastructure/auth/middleware";
+
+// New Imports for Username DMs
+import { DmResolver } from "./domain/chat/dm-resolver";
+import { buildChatRouter } from "./domain/chat/routes";
 
 const env = loadEnv();
 const client = getMongoClient(env);
 const db = client.db("fps-game-database");
+
 const canonicalService = new CanonicalResultService(db);
 const playerService = new PlayerService(db);
 const friendshipService = new FriendshipService(db);
 const chatService = new ChatService(db);
+const dmResolver = new DmResolver(db, chatService);
 const authProvider = new IdentityProvider(env.AUTH_JWKS_URI, env.AUTH_ISSUER, env.AUTH_AUDIENCE);
 
 const app = express();
@@ -54,12 +61,14 @@ const authMiddleware = async (req: express.Request, res: express.Response, next:
   }
 };
 
-app.use(authMiddleware, buildFriendsRouter(friendshipService));
+// Mount Routers
+app.use("/api", authMiddleware, buildFriendsRouter(friendshipService));
+app.use("/api", authMiddleware, buildProgressionRouter(db));
+app.use("/api", authMiddleware, buildChatRouter(dmResolver));
 
 // Match result endpoint (secured)
 app.post("/internal/matches/:matchId/result", authMiddleware, async (req, res): Promise<void> => {
   try {
-    // Express types params as string | string[] | undefined
     const rawMatchId = req.params["matchId"];
     if (!rawMatchId || Array.isArray(rawMatchId)) {
       res.status(400).json({ error: "Missing or invalid matchId parameter" });
@@ -89,7 +98,8 @@ app.post("/internal/matches/:matchId/result", authMiddleware, async (req, res): 
 export function startServer() {
   const server = createServer(app);
   
-  // Initialize Socket.io
+  chatService.ensureIndexes().catch((err: unknown) => logger.error("Failed to init chat indexes", { error: String(err) }));
+
   initChatSocket(server, chatService, authProvider, playerService);
 
   server.listen(env.PORT, () => {
@@ -97,7 +107,4 @@ export function startServer() {
   });
   return server;
 }
-
-
-
 

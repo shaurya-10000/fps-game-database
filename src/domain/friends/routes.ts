@@ -77,7 +77,7 @@ export function buildFriendsRouter(service: FriendshipService): Router {
   router.get("/me/friends", async (req: Request, res: Response) => {
     try {
       const me = playerIdOf(req);
-      res.json({ friends: await service.listFriends(me) });
+      res.json({ friends: await service.listFriendsWithNames(me) });
     } catch (err) {
       handle(err, res);
     }
@@ -86,7 +86,46 @@ export function buildFriendsRouter(service: FriendshipService): Router {
   router.get("/me/friends/requests", async (req: Request, res: Response) => {
     try {
       const me = playerIdOf(req);
-      res.json({ incoming: await service.listIncomingRequests(me) });
+      res.json({ incoming: await service.listIncomingWithNames(me) });
+    } catch (err) {
+      handle(err, res);
+    }
+  });
+
+  router.get("/me/mutes", async (req: Request, res: Response) => {
+    try {
+      const me = playerIdOf(req);
+      res.json({ muted: await service.listMutedIds(me) });
+    } catch (err) {
+      handle(err, res);
+    }
+  });
+
+  router.post("/me/mutes", async (req: Request, res: Response) => {
+    try {
+      const parsed = targetSchema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({ error: "INVALID_PAYLOAD" });
+        return;
+      }
+      const me = playerIdOf(req);
+      await service.mute(me, parsed.data.toPlayerId);
+      res.status(204).send();
+    } catch (err) {
+      handle(err, res);
+    }
+  });
+
+  router.delete("/me/mutes/:mutedId", async (req: Request, res: Response) => {
+    try {
+      const mutedId = requiredStringParam(req, "mutedId");
+      if (!mutedId) {
+        res.status(400).json({ error: "INVALID_PAYLOAD" });
+        return;
+      }
+      const me = playerIdOf(req);
+      await service.unmute(me, mutedId);
+      res.status(204).send();
     } catch (err) {
       handle(err, res);
     }
@@ -115,7 +154,7 @@ function handle(err: unknown, res: Response): void {
   const msg = err instanceof Error ? err.message : String(err);
   logger.warn("Friends route error", { error: msg });
 
-  if (msg === "CANNOT_FRIEND_SELF" || msg === "CANNOT_BLOCK_SELF") {
+  if (msg === "CANNOT_FRIEND_SELF" || msg === "CANNOT_BLOCK_SELF" || msg === "CANNOT_MUTE_SELF") {
     res.status(400).json({ error: msg });
     return;
   }

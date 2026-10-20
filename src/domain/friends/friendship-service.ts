@@ -172,6 +172,56 @@ export class FriendshipService {
     }
   }
 
+  private async displayNames(ids: string[]): Promise<Map<string, string>> {
+    if (ids.length === 0) return new Map();
+    const players = await this.db
+      .collection<{ _id: string } & import("mongodb").Document>("players")
+      .find({ _id: { $in: ids } }, { projection: { displayName: 1 } })
+      .toArray();
+    return new Map(players.map((p) => [p._id, String(p["displayName"] ?? "")] as [string, string]));
+  }
+
+  /** Friends list with each friend's current display name attached. */
+  async listFriendsWithNames(playerId: string, limit = 100) {
+    const rows = await this.listFriends(playerId, limit);
+    const names = await this.displayNames(rows.map((r) => r.toPlayerId));
+    return rows.map((r) => ({ ...r, toPlayerName: names.get(r.toPlayerId) || r.toPlayerId }));
+  }
+
+  /** Incoming requests with the requester's current display name attached. */
+  async listIncomingWithNames(playerId: string, limit = 100) {
+    const rows = await this.listIncomingRequests(playerId, limit);
+    const names = await this.displayNames(rows.map((r) => r.fromPlayerId));
+    return rows.map((r) => ({ ...r, fromPlayerName: names.get(r.fromPlayerId) || r.fromPlayerId }));
+  }
+
+  private mutesCol() {
+    return this.db.collection<{ _id: string } & import("mongodb").Document>("mutes");
+  }
+
+  /** Idempotent: the deterministic _id means a repeat call changes nothing. */
+  async mute(muterId: string, mutedId: string): Promise<void> {
+    if (muterId === mutedId) {
+      throw new Error("CANNOT_MUTE_SELF");
+    }
+    await this.mutesCol().updateOne(
+      { _id: `mute_${muterId}_${mutedId}` },
+      { $setOnInsert: { muterId, mutedId, createdAt: new Date() } },
+      { upsert: true }
+    );
+    logger.info("Player muted", { muterId, mutedId });
+  }
+
+  async unmute(muterId: string, mutedId: string): Promise<void> {
+    await this.mutesCol().deleteOne({ _id: `mute_${muterId}_${mutedId}` });
+    logger.info("Player unmuted", { muterId, mutedId });
+  }
+
+  async listMutedIds(muterId: string, limit = 1000): Promise<string[]> {
+    const docs = await this.mutesCol().find({ muterId }).limit(limit).toArray();
+    return docs.map((d) => String(d["mutedId"]));
+  }
+
   async unfriend(playerId: string, otherId: string): Promise<void> {
     const session = this.db.client.startSession();
     try {

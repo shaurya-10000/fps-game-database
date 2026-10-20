@@ -4,7 +4,7 @@
 
 **A cloud-deployed backend for competitive FPS games.**
 
-Canonical match recording, transactional outbox, sequence-ordered Elo ratings, matchmaking, tournaments, moderation, and real-time communications (chat, friends, WebRTC calls), built so every match result is recorded once and only once, even when networks and workers fail.
+Canonical match recording, transactional outbox, sequence-ordered Elo ratings, matchmaking, tournaments, moderation, real-time communications (chat, friends, WebRTC calls), and mode-aware XP progression, built so every match result is recorded once and only once, even when networks and workers fail.
 
 [![CI](https://github.com/shaurya-10000/fps-game-database/actions/workflows/ci.yml/badge.svg)](https://github.com/shaurya-10000/fps-game-database/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
@@ -41,6 +41,7 @@ Canonical match recording, transactional outbox, sequence-ordered Elo ratings, m
 - **Exactly-once effect.** Match results are recorded once, even if clients retry, networks drop acknowledgements, or workers crash mid-flight.
 - **Event-driven projections.** Ratings, XP, and leaderboards are derived asynchronously through a transactional outbox. They can be rebuilt from scratch without touching canonical data.
 - **Real-time communications.** Socket.io handles authenticated, bi-directional WebSocket connections for Global, Region, Group, and DM chat, and acts as a signaling relay for peer-to-peer WebRTC voice and video calls.
+- **Mode-aware progression.** The XP engine calculates rewards contextually: K/D matters in Team Deathmatch, survival time matters in Battle Royale, and the leveling curve gets progressively harder as players rank up.
 - **Strict ordering.** Per-player rating sequences are enforced atomically. Out-of-order events are deferred, duplicates are no-ops, and gaps block application until resolved.
 - **Security by design.** BOLA-safe responses (404 instead of 403), Zod-strict mass-assignment defense, JWT verification against a JWKS, socket-level JWT authentication, and mid-session suspension enforcement.
 - **Typed game content model.** Maps, weapons with full ballistics, characters, throwables, equipment, and game modes are strictly typed TypeScript domain models, seeded into versioned catalogs that matches pin to.
@@ -54,6 +55,7 @@ Canonical match recording, transactional outbox, sequence-ordered Elo ratings, m
 | **Canonical match results** | Versioned content catalog, match lifecycle state machine, idempotent result submission, ambiguous-commit resolution |
 | **Outbox and consumers** | Lease-based claiming, exponential backoff with jitter, dead-lettering with replay, backpressure monitoring |
 | **Competitive ratings** | Elo rating algorithm, tier derivation, audited rating corrections, season lifecycle |
+| **Progression and XP** | Mode-aware XP calculation, progressive leveling curve, transaction-safe multi-level-ups |
 | **Stats and economy** | Rebuildable projections, cursor-paginated leaderboards, idempotent inventory grants, progression (XP) ledger |
 | **Matchmaking** | Ticket state machine, atomic allocation, partial-claim prevention, cancellation-vs-allocation race handling, allocator crash recovery |
 | **Tournaments** | Immutable bracket revisions, idempotent bracket advancement |
@@ -79,8 +81,8 @@ flowchart TD
     R -.-> P2P["Peer-to-peer audio / video"]
 
     T --> O["Outbox relay<br/>lease-based claim, backoff + jitter,<br/>stale-worker fencing, dead-letter + replay"]
-    O --> RP["Rating processor (atomic)<br/>per-player sequence, strict ordering,<br/>rating + event + delivery in one write"]
-    RP --> V[("competitiveRatings<br/>projection (read model)")]
+    O --> RP["Consumers (atomic)<br/>Rating processor (Elo)<br/>Progression (XP engine)<br/>Statistics"]
+    RP --> V[("Read models<br/>competitiveRatings<br/>progressionProfiles")]
 ```
 
 <details>
@@ -116,15 +118,16 @@ Client (HTTP POST / WebSocket)
        |
        v
 +---------------------------------------+
-|  Rating Processor (atomic)            |
+|  Consumers (atomic)                   |
 |  ---------------------------------    |
-|  Per-player sequence allocation       |
-|  Strict ordering enforcement          |
-|  Atomic: rating + event + delivery    |
+|  Rating Processor (Elo)               |
+|  Progression (XP Engine)              |
+|  Statistics                           |
 +---------------------------------------+
        |
        v
-  competitiveRatings projection (read model)
+  competitiveRatings, progressionProfiles
+  (read models)
 ```
 
 </details>
@@ -150,6 +153,7 @@ Client (HTTP POST / WebSocket)
 | Concurrent friend accept | Unique index on reverse direction ensures exactly one pair is created |
 | Socket connection drops | Client auto-reconnects via Socket.io, re-authenticates, and rejoins rooms |
 | WebRTC target offline | Signaling event is dropped; client times out waiting for Answer |
+| Player levels up multiple times in one match | Transaction-safe loop applies levels until the XP is spent |
 
 ## Game content catalog
 
@@ -227,14 +231,14 @@ Five characters per role class.
 
 ### 🎮 Game modes and matchmaking (2 buckets × 4 modes)
 
-Matchmaking supports **Ranked** and **Unranked** buckets across four core modes.
+Matchmaking supports **Ranked** and **Unranked** buckets across four core modes. XP is calculated contextually depending on the mode.
 
-| Mode | Team size | Rounds | Supported buckets |
+| Mode | Team size | Rounds | XP priority |
 | :--- | :--- | :--- | :--- |
-| **Team Deathmatch** | 5v5 | 1 | Ranked, Unranked |
-| **Free-for-All** | Solo (everyone vs everyone) | 1 | Ranked, Unranked |
-| **Bomb Defusal** | 5v5 | 7 | Ranked, Unranked |
-| **Battle Royale** | Solo, Duo, Trio, Squad (up to 5) | 1 | Ranked, Unranked |
+| **Team Deathmatch** | 5v5 | 1 | Kills, damage dealt, fewer deaths |
+| **Free-for-All** | Solo (everyone vs everyone) | 1 | Kills, damage dealt, fewer deaths |
+| **Bomb Defusal** | 5v5 | 7 | Kills, objective score |
+| **Battle Royale** | Solo, Duo, Trio, Squad (up to 5) | 1 | Survival time, kills |
 
 ### Content model
 
@@ -335,7 +339,7 @@ curl http://localhost:3000/health
 | `npm run dev` | Start the API in development mode |
 | `npm run build` | Compile `src/` to `dist/` |
 | `npm start` | Run the compiled API |
-| `npm run start:worker` | Run the background worker (outbox relay + rating processor) |
+| `npm run start:worker` | Run the background worker (outbox relay, rating processor, progression) |
 | `npm run typecheck` | Strict typecheck, including tests |
 | `npm test` | Unit tests |
 | `npm run test:integration` | Integration tests against Atlas |
@@ -381,7 +385,7 @@ The API runs as a Web Service on Render.
 
 ### Background worker (outbox relay)
 
-By design, the HTTP server only handles canonical writes. Projection workers (`OutboxRelay`, `RatingProcessor`) run as a separate, continuous process. To process ratings in a deployment, run a Render **Background Worker** with:
+By design, the HTTP server only handles canonical writes. Projection workers (`OutboxRelay`, `RatingProcessor`, `ProgressionService`) run as a separate, continuous process. To process ratings and progression in a deployment, run a Render **Background Worker** with:
 
 ```bash
 npm run start:worker
@@ -422,7 +426,7 @@ To report a vulnerability, please use GitHub's private vulnerability reporting o
 | Integration tests fail to connect | Wrong or missing `MONGODB_URI` | Check `.env` against `.env.example`; allow your IP in Atlas network access |
 | `npm install` fails on engine check | Node older than 20.19.0 | Upgrade Node |
 | `verify:indexes` reports drift | Migration not applied | Run `npm run migrate`, then re-verify |
-| Ratings never update in a deployment | Worker not running | Start the background worker (`npm run start:worker`) |
+| Ratings or XP never update in a deployment | Worker not running | Start the background worker (`npm run start:worker`) |
 | Deliveries stuck in dead-letter | Persistent consumer failure | Fix the root cause, then `npm run replay:dead-letter <id>` |
 | Chat connects but no messages appear | Client not emitting `join_room` | Ensure the client joins `global_chat` or the correct DM room ID |
 | WebRTC call fails to connect | STUN/TURN server unreachable | Check client ICE configuration; ensure both peers are online |

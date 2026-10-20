@@ -5,7 +5,9 @@ import { logger } from "./infrastructure/logging/logger";
 import { OutboxRelay } from "./infrastructure/outbox/relay";
 import { RatingProcessor, RatingEvent } from "./domain/matches/rating-processor";
 import { ProgressionService } from "./domain/progression/progression-service";
+import { MasteryService } from "./domain/leaderboards/mastery-service";
 import { MatchResultPayload } from "./domain/matches/canonical-service";
+import { XpEngine } from "./domain/progression/xp-engine";
 
 const env = loadEnv();
 const client = getMongoClient(env);
@@ -15,6 +17,7 @@ const workerId = `worker-${process.pid}`;
 const relay = new OutboxRelay(db, workerId);
 const ratingProcessor = new RatingProcessor(db);
 const progressionService = new ProgressionService(db);
+const masteryService = new MasteryService(db);
 
 interface Delivery {
   _id: string;
@@ -57,7 +60,20 @@ async function processDelivery(delivery: Delivery): Promise<void> {
       const payload = event["payload"];
       
       for (const participant of payload.participants) {
+        // 1. Award overall player XP (Levels up the player)
         await progressionService.awardMatchXp(participant, payload.gameModeId);
+
+        // 2. Award Weapon/Character Mastery XP
+        // In the future, the payload will include actual weaponId and characterId.
+        // For now, we award XP to "default_weapon" and "default_character"
+        // to prove the mastery leaderboard pipeline works.
+        const baseXp = XpEngine.calculateMatchXp(participant, payload.gameModeId);
+        const masteryXpGained = Math.floor(baseXp * 0.1); // 10% of total XP goes to mastery
+
+        if (masteryXpGained > 0) {
+          await masteryService.awardMasteryXp(participant.playerId, "weapon", "default_weapon", masteryXpGained);
+          await masteryService.awardMasteryXp(participant.playerId, "character", "default_character", masteryXpGained);
+        }
       }
       return;
     }

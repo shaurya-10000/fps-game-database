@@ -2,9 +2,9 @@
 
 # 🎮 FPS Game Database
 
-**A cloud-deployed backend for competitive FPS games.**
+**A cloud-deployed backend and web dashboard for competitive FPS games.**
 
-Canonical match recording, transactional outbox, sequence-ordered Elo ratings, matchmaking, tournaments, moderation, real-time communications (chat, friends, WebRTC calls), and mode-aware XP progression, built so every match result is recorded once and only once, even when networks and workers fail.
+Canonical match recording, transactional outbox, sequence-ordered Elo ratings, matchmaking, tournaments, moderation, real-time communications (chat, group chats, friends, WebRTC calls), and mode-aware XP progression, built so every match result is recorded once and only once, even when networks and workers fail.
 
 [![CI](https://github.com/shaurya-10000/fps-game-database/actions/workflows/ci.yml/badge.svg)](https://github.com/shaurya-10000/fps-game-database/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
@@ -12,6 +12,7 @@ Canonical match recording, transactional outbox, sequence-ordered Elo ratings, m
 [![MongoDB](https://img.shields.io/badge/MongoDB-Atlas-green?logo=mongodb)](https://www.mongodb.com/atlas)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org)
 [![Socket.io](https://img.shields.io/badge/Socket.io-4.0+-black?logo=socket.io)](https://socket.io)
+[![Next.js](https://img.shields.io/badge/Dashboard-Next.js_16-black?logo=nextdotjs)](#web-dashboard)
 
 [**Live API Health Check**](https://fps-game-database.onrender.com/health) · [**Report a bug**](https://github.com/shaurya-10000/fps-game-database/issues)
 
@@ -23,7 +24,9 @@ Canonical match recording, transactional outbox, sequence-ordered Elo ratings, m
 
 - [Highlights](#highlights)
 - [Features](#features)
+- [Web dashboard](#web-dashboard)
 - [Architecture](#architecture)
+- [Chat API and socket events](#chat-api-and-socket-events)
 - [Game content catalog](#game-content-catalog)
 - [Core guarantees](#core-guarantees)
 - [Tech stack](#tech-stack)
@@ -41,9 +44,11 @@ Canonical match recording, transactional outbox, sequence-ordered Elo ratings, m
 - **Exactly-once effect.** Match results are recorded once, even if clients retry, networks drop acknowledgements, or workers crash mid-flight.
 - **Event-driven projections.** Ratings, XP, and leaderboards are derived asynchronously through a transactional outbox. They can be rebuilt from scratch without touching canonical data.
 - **Real-time communications.** Socket.io handles authenticated, bi-directional WebSocket connections for Global, Region, Group, and DM chat, and acts as a signaling relay for peer-to-peer WebRTC voice and video calls.
+- **Full-featured chat.** Group chats with admins, replies, reactions, edit and delete, pinned messages, server-side search, and paged history, with membership enforced on every room.
+- **Web dashboard.** A Next.js dashboard puts the whole platform in a browser: catalog, rankings, profile and progression, friends, chat, group chats, and voice and video calls.
 - **Mode-aware progression.** The XP engine calculates rewards contextually: K/D matters in Team Deathmatch, survival time matters in Battle Royale, and the leveling curve gets progressively harder as players rank up.
 - **Strict ordering.** Per-player rating sequences are enforced atomically. Out-of-order events are deferred, duplicates are no-ops, and gaps block application until resolved.
-- **Security by design.** BOLA-safe responses (404 instead of 403), Zod-strict mass-assignment defense, JWT verification against a JWKS, socket-level JWT authentication, and mid-session suspension enforcement.
+- **Security by design.** BOLA-safe responses (404 instead of 403), Zod-strict mass-assignment defense, JWT verification against a JWKS, socket-level JWT authentication, room-level access checks, and mid-session suspension enforcement.
 - **Typed game content model.** Maps, weapons with full ballistics, characters, throwables, equipment, and game modes are strictly typed TypeScript domain models, seeded into versioned catalogs that matches pin to.
 - **Deployed and running.** The REST API and WebSocket server run on Render against a managed MongoDB Atlas cluster. Background workers run separately from the HTTP server.
 - **Tested against a real database.** 106 passing tests (24 unit, 82 integration) cover concurrency, failure injection, crash recovery, social graph race conditions, and state machines. Integration tests use real MongoDB transactions, not mocks.
@@ -61,11 +66,56 @@ Canonical match recording, transactional outbox, sequence-ordered Elo ratings, m
 | **Tournaments** | Immutable bracket revisions, idempotent bracket advancement |
 | **Moderation and audit** | Report and sanction workflow, audit events, admin route separation |
 | **Social graph** | Friendships with mutual auto-accept, directional blocking (dominant over friendships), BOLA-safe error surfaces, in-flight request caps |
-| **Real-time chat** | Authenticated WebSocket connections via Socket.io. Global, Region, and Group rooms, plus deterministic Direct Messages (DMs) |
+| **Real-time chat** | Authenticated WebSocket connections via Socket.io. Global and Region rooms, deterministic Direct Messages (DMs), live updates for edits, deletes, reactions, and pins |
+| **Group chats** | Create from friends, rename, add and remove members, leave. Creator is admin, admin role is handed on when the last admin leaves. System notices for membership changes |
+| **Message features** | Replies with quoted previews, 8 fixed reactions, edit, delete for everyone, pinned messages (50 per room), server-side search, paged history, voice messages |
 | **WebRTC signaling** | Backend relay for peer-to-peer voice and video calls. Handles Offer, Answer, ICE candidate exchange, and call termination |
 | **Content catalog** | Versioned, typed catalog of maps, weapons (with ballistics), characters, throwables, equipment, and game modes; every match pins to a catalog version |
 | **Identity** | JWKS-validated JWTs, concurrent first-login safety, identity linking, account-status enforcement |
+| **Web dashboard** | Next.js app for the catalog, rankings, profile, friends, chat, group chats, and calls |
 | **Operations** | Migrations, deterministic seeding, index/validator/constraint verification, graceful shutdown, runbooks |
+
+## Web dashboard
+
+The dashboard is a Next.js app that talks to this API and its WebSocket server. It is developed as its own project (`frontend`) and needs this backend running.
+
+<!-- Add screenshots here once captured, for example:
+<p align="center"><img src="docs/images/dashboard-dms.png" alt="Direct messages" width="860" /></p>
+-->
+
+| Area | What you can do |
+| :--- | :--- |
+| **Catalog** | Browse weapons (with full ballistics), maps, characters, equipment, throwables, and game modes |
+| **Rankings** | Read the cursor-paginated leaderboard |
+| **Profile** | See your level and XP progress, friend count, and edit your display name, username, and email |
+| **Friends** | Manage friends, requests, and blocks |
+| **Global chat** | Join the global room with voice messages |
+| **Direct messages** | Search and pin chats, reply, react, edit, delete, pin messages, search history, send voice messages and emoji, with optimistic sending and retry |
+| **Group chats** | Create groups from your friends, rename them, manage members, and leave |
+| **Calls** | Voice and video calls with pre-answer setup (mic, camera, screen share), a device menu, ringtones, and reconnect handling |
+
+### Running the dashboard
+
+From the dashboard project folder (`frontend`):
+
+```bash
+npm install
+cp .env.local.example .env.local   # then set the values below
+npm run dev
+```
+
+| Variable | Required | Purpose |
+| :--- | :--- | :--- |
+| `NEXT_PUBLIC_API_URL` | Yes | Base URL of this API and its WebSocket server (default `http://localhost:3000`) |
+| `MONGODB_URI` | Yes | Atlas connection string for the server-rendered catalog and ranking pages |
+| `NEXT_PUBLIC_TURN_URL`, `NEXT_PUBLIC_TURN_USERNAME`, `NEXT_PUBLIC_TURN_CREDENTIAL` | No | TURN relay so calls work across strict networks |
+
+> [!WARNING]
+> `.env.local` contains your database connection string. Keep it git-ignored and never commit it.
+
+### Calls
+
+Calls are peer-to-peer WebRTC; this API only relays the signaling. While a call is ringing you can set up your microphone, camera, and screen share before you answer. During a call you can switch microphone, camera, and speaker (speaker choice needs a Chromium-based browser), share your screen, go fullscreen, and use the keyboard: `M` mute, `V` camera, `S` share screen, `F` fullscreen, `Enter` accept. Incoming calls ring on every dashboard page. Group calls are not supported.
 
 ## Architecture
 
@@ -73,7 +123,7 @@ Canonical truth, event-driven projections, and real-time communications.
 
 ```mermaid
 flowchart TD
-    C["Client<br/>(HTTP POST / WebSocket)"] --> A["JWT auth middleware<br/>Socket.io middleware"]
+    C["Clients<br/>(Dashboard, HTTP POST / WebSocket)"] --> A["JWT auth middleware<br/>Socket.io middleware"]
 
     A --> T["Canonical transaction (MongoDB)<br/>matches, matchParticipants, outboxEvents,<br/>outboxDeliveries, idempotencyRecords"]
     A --> R["Real-time chat (Socket.io)<br/>chatRooms, chatMessages,<br/>WebRTC signaling relay"]
@@ -89,7 +139,7 @@ flowchart TD
 <summary>Plain-text version of the diagram</summary>
 
 ```text
-Client (HTTP POST / WebSocket)
+Clients (Dashboard, HTTP POST / WebSocket)
        |
        v
 [JWT Auth Middleware / Socket.io Middleware]
@@ -154,6 +204,47 @@ Client (HTTP POST / WebSocket)
 | Socket connection drops | Client auto-reconnects via Socket.io, re-authenticates, and rejoins rooms |
 | WebRTC target offline | Signaling event is dropped; client times out waiting for Answer |
 | Player levels up multiple times in one match | Transaction-safe loop applies levels until the XP is spent |
+| Member removed from a group | Their live sockets leave the room immediately, so no further messages are delivered |
+
+## Chat API and socket events
+
+All routes are authenticated. Rooms are checked on every read and write: DM rooms belong to their two participants, group rooms to their members, Global and Region rooms are open.
+
+### REST
+
+| Method | Path | Purpose |
+| :--- | :--- | :--- |
+| `GET` | `/api/chat/dm-by-id/:playerId` | Get or create the DM room with a friend |
+| `GET` | `/api/chat/groups` | List the groups you belong to, with members |
+| `POST` | `/api/chat/groups` | Create a group from friends: `{ name, memberIds }` |
+| `GET` | `/api/chat/groups/:roomId` | Group details and members |
+| `PATCH` | `/api/chat/groups/:roomId` | Rename (admin): `{ name }` |
+| `POST` | `/api/chat/groups/:roomId/members` | Add friends: `{ memberIds }` |
+| `DELETE` | `/api/chat/groups/:roomId/members/:playerId` | Remove a member (admin), or leave (yourself) |
+| `GET` | `/api/chat/rooms/:roomId/history` | Older messages: `?before=<ISO>&limit=` (max 100) |
+| `GET` | `/api/chat/rooms/:roomId/search` | Search messages: `?q=` (2 to 100 characters) |
+| `GET` | `/api/chat/rooms/:roomId/pins` | Pinned messages |
+| `POST` / `DELETE` | `/api/chat/rooms/:roomId/messages/:messageId/pin` | Pin or unpin (max 50 per room) |
+| `PATCH` | `/api/chat/rooms/:roomId/messages/:messageId` | Edit your own text message: `{ content }` |
+| `DELETE` | `/api/chat/rooms/:roomId/messages/:messageId` | Delete for everyone (author, or group admin) |
+| `POST` | `/api/chat/rooms/:roomId/messages/:messageId/reactions` | Toggle a reaction: `{ emoji }` (fixed set of 8) |
+| `POST` | `/api/chat/rooms/:roomId/voice` | Upload a voice message (multipart) |
+
+### Socket events
+
+| Direction | Event | Payload |
+| :--- | :--- | :--- |
+| Client to server | `join_room` | `roomId` |
+| Client to server | `send_message` | `{ roomId, content, replyToId? }` (max 2000 characters, rate limited to 20 per 10 seconds) |
+| Server to client | `room_history` | Latest 50 messages, oldest first |
+| Server to client | `new_message` | Message, including system notices |
+| Server to client | `message_edited` / `message_deleted` | `{ roomId, messageId, ... }` |
+| Server to client | `message_reactions` | `{ roomId, messageId, reactions }` |
+| Server to client | `message_pinned` / `message_unpinned` | `{ roomId, messageId, pinned? }` |
+| Server to client | `group_updated` | `{ roomId }`, sent to current and removed members |
+| Server to client | `error` | Human-readable string |
+| Client to server | `call_user`, `answer_call`, `ice_candidate`, `end_call` | WebRTC signaling payloads with `targetPlayerId` |
+| Server to client | `incoming_call`, `call_answered`, `ice_candidate`, `call_ended` | The same payloads, tagged with `fromPlayerId` |
 
 ## Game content catalog
 
@@ -282,31 +373,45 @@ Weapon types, throwable types, character roles, game modes, and matchmaking buck
 
 ## Tech stack
 
-<p align="center">
+### Backend and data
+
+<p>
   <img src="https://img.shields.io/badge/Node.js-20.19+-339933?style=for-the-badge&logo=node.js&logoColor=white" alt="Node.js" />
   <img src="https://img.shields.io/badge/TypeScript-strict-3178C6?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript" />
   <img src="https://img.shields.io/badge/Express-000000?style=for-the-badge&logo=express&logoColor=white" alt="Express" />
-  <img src="https://img.shields.io/badge/Socket.io-010101?style=for-the-badge&logo=socket.io&logoColor=white" alt="Socket.io" />
-  <img src="https://img.shields.io/badge/WebRTC-333333?style=for-the-badge&logo=webrtc&logoColor=white" alt="WebRTC" />
   <img src="https://img.shields.io/badge/MongoDB_Atlas-47A248?style=for-the-badge&logo=mongodb&logoColor=white" alt="MongoDB Atlas" />
   <img src="https://img.shields.io/badge/Zod-3E67B1?style=for-the-badge&logo=zod&logoColor=white" alt="Zod" />
   <img src="https://img.shields.io/badge/JWT-000000?style=for-the-badge&logo=jsonwebtokens&logoColor=white" alt="JWT" />
+</p>
+
+### Real-time and media
+
+<p>
+  <img src="https://img.shields.io/badge/Socket.io-010101?style=for-the-badge&logo=socket.io&logoColor=white" alt="Socket.io" />
+  <img src="https://img.shields.io/badge/WebRTC-333333?style=for-the-badge&logo=webrtc&logoColor=white" alt="WebRTC" />
+</p>
+
+### Dashboard
+
+<p>
+  <img src="https://img.shields.io/badge/Next.js-16-000000?style=for-the-badge&logo=nextdotjs&logoColor=white" alt="Next.js" />
+  <img src="https://img.shields.io/badge/React-19-61DAFB?style=for-the-badge&logo=react&logoColor=black" alt="React" />
+  <img src="https://img.shields.io/badge/TypeScript-5-3178C6?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript" />
+  <img src="https://img.shields.io/badge/Tailwind_CSS-4-06B6D4?style=for-the-badge&logo=tailwindcss&logoColor=white" alt="Tailwind CSS" />
+  <img src="https://img.shields.io/badge/Framer_Motion-0055FF?style=for-the-badge&logo=framer&logoColor=white" alt="Framer Motion" />
+  <img src="https://img.shields.io/badge/shadcn%2Fui-000000?style=for-the-badge&logo=shadcnui&logoColor=white" alt="shadcn/ui" />
+  <img src="https://img.shields.io/badge/Lucide-F56565?style=for-the-badge&logo=lucide&logoColor=white" alt="Lucide" />
+  <img src="https://img.shields.io/badge/Socket.io_Client-010101?style=for-the-badge&logo=socket.io&logoColor=white" alt="Socket.io client" />
+  <img src="https://img.shields.io/badge/ESLint-4B32C3?style=for-the-badge&logo=eslint&logoColor=white" alt="ESLint" />
+</p>
+
+### Testing, CI and hosting
+
+<p>
   <img src="https://img.shields.io/badge/Vitest-6E9F18?style=for-the-badge&logo=vitest&logoColor=white" alt="Vitest" />
   <img src="https://img.shields.io/badge/GitHub_Actions-2088FF?style=for-the-badge&logo=githubactions&logoColor=white" alt="GitHub Actions" />
   <img src="https://img.shields.io/badge/Render-46E3B7?style=for-the-badge&logo=render&logoColor=black" alt="Render" />
 </p>
-
-| Layer | Choice |
-| :--- | :--- |
-| Runtime | [Node.js](https://nodejs.org) (>= 20.19.0) |
-| Language | [TypeScript](https://www.typescriptlang.org) (strict, no `any`) |
-| HTTP server | [Express](https://expressjs.com) |
-| Real-time | [Socket.io](https://socket.io) (chat and WebRTC signaling) |
-| Database | [MongoDB Atlas](https://www.mongodb.com/atlas) (replica set) |
-| Validation | [Zod](https://zod.dev) (strict schemas) |
-| Auth | [jose](https://github.com/panva/jose) (JWKS, JWT) |
-| Testing | [Vitest](https://vitest.dev) |
-| CI/CD | GitHub Actions → Render |
 
 ## Quick start
 
@@ -331,6 +436,8 @@ The server starts on `http://localhost:3000`. Verify it:
 curl http://localhost:3000/health
 # {"status":"ok","env":"development"}
 ```
+
+To use the dashboard against it, see [Web dashboard](#web-dashboard).
 
 ## Scripts
 
@@ -383,6 +490,8 @@ The API runs as a Web Service on Render.
 > [!NOTE]
 > If the instance has been idle, the first request to the live health check may take a while to respond.
 
+On the first start after upgrading to the group chat release, the server replaces the old unique `{ type, name }` index on `chatRooms` with one that only covers Global and Region rooms, so several groups can share a name. No manual migration is needed.
+
 ### Background worker (outbox relay)
 
 By design, the HTTP server only handles canonical writes. Projection workers (`OutboxRelay`, `RatingProcessor`, `ProgressionService`) run as a separate, continuous process. To process ratings and progression in a deployment, run a Render **Background Worker** with:
@@ -410,6 +519,8 @@ npm run start:worker
 
 - JWTs are verified against a JWKS with issuer, audience, and expiry checks.
 - WebSocket connections are authenticated using the same JWT middleware as HTTP.
+- Chat rooms are access-checked on every join, send, history, search, pin, edit, delete, reaction, and voice upload: DM rooms belong to their two participants and group rooms to their members.
+- Message sending is rate limited per connection, and reactions are restricted to a fixed set so arbitrary text never becomes a database key.
 - Unauthorized access to another player's resources returns 404, not 403, to avoid leaking existence.
 - Blocking a player hides your presence from them and prevents future friend requests or DMs.
 - Request bodies use strict schemas (unknown fields rejected), with matching validators at the database layer.
@@ -429,7 +540,10 @@ To report a vulnerability, please use GitHub's private vulnerability reporting o
 | Ratings or XP never update in a deployment | Worker not running | Start the background worker (`npm run start:worker`) |
 | Deliveries stuck in dead-letter | Persistent consumer failure | Fix the root cause, then `npm run replay:dead-letter <id>` |
 | Chat connects but no messages appear | Client not emitting `join_room` | Ensure the client joins `global_chat` or the correct DM room ID |
+| Joining a room returns "Unauthorized" | You are not a participant or member | Open the DM through `/api/chat/dm-by-id/:playerId`, or ask to be added to the group |
+| Creating a second group with the same name fails | Old unique index still present | Restart the API once so it can replace the index |
 | WebRTC call fails to connect | STUN/TURN server unreachable | Check client ICE configuration; ensure both peers are online |
+| Calls work on one network but not across networks | No TURN relay configured | Provide a TURN server in the dashboard's `NEXT_PUBLIC_TURN_*` settings |
 
 ## License
 

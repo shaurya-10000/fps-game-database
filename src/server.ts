@@ -155,7 +155,7 @@ app.get("/api/me/players/search", authMiddleware, async (req, res) => {
     const db = req.app.locals['db'] as Db;
     const myId = req.ctx?.player?._id || "";
     const players = await db.collection<{ _id: string, displayName: string } & import("mongodb").Document>("players").find({ 
-      displayName: { $regex: "^" + q, $options: "i" },
+      displayName: { $regex: "^" + q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), $options: "i" },
       _id: { $ne: myId }
     }).project({ _id: 1, displayName: 1 }).limit(20).toArray();
     res.json({ results: players });

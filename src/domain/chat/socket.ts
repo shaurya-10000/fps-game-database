@@ -1,7 +1,7 @@
 import { Server as SocketServer, Socket } from "socket.io";
 import { Server as HttpServer } from "http";
 import { ChatService, MAX_MESSAGE_LENGTH } from "./service";
-import { canAccessRoom } from "./room-access";
+import { canAccessRoom, roomRecipients } from "./room-access";
 import { IdentityProvider } from "../../infrastructure/auth/identity-provider";
 import { PlayerService } from "../players/player-service";
 import { logger } from "../../infrastructure/logging/logger";
@@ -31,6 +31,7 @@ export function initChatSocket(
       const player = await playerService.resolvePlayer(principal);
 
       socket.data.playerId = player._id;
+      socket.data.playerName = String((player as unknown as Record<string, unknown>)["displayName"] ?? player._id.slice(0, 8));
       next();
     } catch (err) {
       logger.warn("Socket auth failed", { error: String(err) });
@@ -40,7 +41,9 @@ export function initChatSocket(
 
   io.on("connection", (socket: Socket) => {
     const playerId = socket.data.playerId as string;
+    const playerName = String(socket.data.playerName ?? playerId.slice(0, 8));
     const sentAt: number[] = [];
+    const lastTyping = new Map<string, number>();
 
     // Join a personal room based on playerId for direct targeting
     socket.join(playerId);
@@ -87,10 +90,37 @@ export function initChatSocket(
         const replyToId = typeof data.replyToId === "string" && data.replyToId ? data.replyToId : undefined;
         const message = await chatService.saveMessage(data.roomId, playerId, content, replyToId);
         io.to(data.roomId).emit("new_message", message);
+
+        // Tell the other participants (even if they have not opened this chat) so they can show unread badges.
+        const recipients = await roomRecipients(db, data.roomId, playerId);
+        if (recipients) {
+          const activity = {
+            roomId: data.roomId,
+            kind: recipients.kind,
+            senderId: playerId,
+            senderName: message.senderName,
+            preview: message.content.slice(0, 100),
+            messageId: message._id,
+            createdAt: message.createdAt,
+          };
+          for (const id of recipients.ids) io.to(id).emit("chat_activity", activity);
+        }
       } catch (err) {
         logger.error("Error sending message", { error: String(err) });
         socket.emit("error", "Failed to send message");
       }
+    });
+
+    // Typing indicators are only relayed inside rooms this socket has joined, and throttled.
+    socket.on("typing", (data: { roomId?: unknown; typing?: unknown }) => {
+      if (!data || typeof data.roomId !== "string" || !socket.rooms.has(data.roomId)) return;
+      const typing = data.typing === true;
+      const now = Date.now();
+      if (typing) {
+        if (now - (lastTyping.get(data.roomId) ?? 0) < 1500) return;
+        lastTyping.set(data.roomId, now);
+      }
+      socket.to(data.roomId).emit("typing", { roomId: data.roomId, playerId, name: playerName, typing });
     });
 
     // --- WEBRTC SIGNALING EVENTS ---

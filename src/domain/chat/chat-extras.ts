@@ -274,6 +274,8 @@ export class ChatExtrasService {
 
   async pin(actorId: string, roomId: string, messageId: string, io: Io | null): Promise<void> {
     await this.requireAccess(actorId, roomId);
+    // Pins are for private conversations; in open rooms (global, region) anyone could pin anything.
+    if (!roomId.startsWith("dm_") && !roomId.startsWith("group_")) fail("FORBIDDEN");
     const count = await this.messages().countDocuments({ roomId, "pinned.at": { $exists: true } });
     if (count >= MAX_PINS_PER_ROOM) fail("PIN_LIMIT");
     const pinned = { by: actorId, at: new Date() };

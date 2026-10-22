@@ -53,7 +53,12 @@ export class ChatService {
 
     // Group names are not unique (two groups may both be called "Squad"), so the
     // old unique { type, name } index is replaced by one that only covers global/region rooms.
-    const existing = await rooms.indexes();
+    let existing: Awaited<ReturnType<typeof rooms.indexes>> = [];
+    try {
+      existing = await rooms.indexes();
+    } catch {
+      // The collection does not exist yet (fresh database), so there is nothing to migrate.
+    }
     const legacy = existing.find((index) => index.name === "type_1_name_1" && !index.partialFilterExpression);
     if (legacy) await rooms.dropIndex("type_1_name_1");
     await rooms.createIndex(

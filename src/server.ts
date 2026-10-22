@@ -22,6 +22,8 @@ import { IdentityProvider } from "./infrastructure/auth/identity-provider";
 import { Context } from "./infrastructure/auth/middleware";
 import { DmResolver } from "./domain/chat/dm-resolver";
 import { buildChatRouter } from "./domain/chat/routes";
+import { buildChatExtrasRouter } from "./domain/chat/chat-extras";
+import { canAccessRoom } from "./domain/chat/room-access";
 import { AuthService } from "./domain/auth/auth-service";
 import { buildAuthRouter } from "./domain/auth/routes";
 
@@ -83,7 +85,7 @@ app.get("/api/me/profile", authMiddleware, async (req, res) => {
     const db = req.app.locals['db'] as Db;
     type Doc = { _id: string } & import("mongodb").Document;
     const p = await db.collection<Doc>("players").findOne({ _id: playerId });
-    res.json({ displayName: p?.["displayName"] ?? "", username: p?.["username"] ?? "" });
+    res.json({ playerId, displayName: p?.["displayName"] ?? "", username: p?.["username"] ?? "" });
   } catch (err) {
     logger.error("Profile fetch failed", { error: String(err) });
     res.status(500).json({ error: "FETCH_FAILED" });
@@ -166,6 +168,11 @@ app.post("/api/chat/rooms/:roomId/voice", authMiddleware, upload.single("audio")
     const roomId = req.params["roomId"] as string;
     const playerId = req.ctx?.player?._id;
     if (!playerId) { res.status(401).json({ error: "UNAUTHORIZED" }); return; }
+    if (!(await canAccessRoom(req.app.locals['db'] as Db, playerId, roomId))) {
+      if (req.file) fs.unlink(req.file.path, () => undefined);
+      res.status(403).json({ error: "FORBIDDEN" });
+      return;
+    }
     if (!req.file) { res.status(400).json({ error: "No audio file" }); return; }
     
     const url = `${process.env["BACKEND_URL"] || "http://localhost:3000"}/uploads/${req.file.filename}`;
@@ -188,7 +195,7 @@ app.post("/api/chat/rooms/:roomId/voice", authMiddleware, upload.single("audio")
   } catch (err) { res.status(500).json({ error: "VOICE_UPLOAD_FAILED" }); }
 });
 
-app.post("/api/chat/groups", authMiddleware, async (req, res) => {
+app.post("/api/chat/groups-legacy", authMiddleware, async (req, res) => {
   try {
     const { name, memberIds } = req.body;
     const creatorId = req.ctx?.player?._id;
@@ -207,6 +214,7 @@ app.post("/api/chat/groups", authMiddleware, async (req, res) => {
 app.use("/api", authMiddleware, buildFriendsRouter(friendshipService));
 app.use("/api", authMiddleware, buildProgressionRouter(db));
 app.use("/api", authMiddleware, buildChatRouter(dmResolver));
+app.use("/api", authMiddleware, buildChatExtrasRouter(db));
 app.use("/api", authMiddleware, buildLeaderboardRouter(leaderboardService));
 
 // Match result
@@ -233,7 +241,7 @@ export function startServer() {
   masteryService.ensureIndexes().catch((err: unknown) => logger.error("Failed to init mastery indexes", { error: String(err) }));
   chatService.ensureIndexes().catch((err: unknown) => logger.error("Failed to init chat indexes", { error: String(err) }));
 
-  const io = initChatSocket(server, chatService, authProvider, playerService);
+  const io = initChatSocket(server, chatService, authProvider, playerService, db);
   app.locals['io'] = io;
 
   server.listen(env.PORT, () => { logger.info(`Server and Chat listening on port ${env.PORT}`); });

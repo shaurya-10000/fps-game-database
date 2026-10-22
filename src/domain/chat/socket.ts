@@ -1,15 +1,21 @@
 import { Server as SocketServer, Socket } from "socket.io";
 import { Server as HttpServer } from "http";
-import { ChatService } from "./service";
+import { ChatService, MAX_MESSAGE_LENGTH } from "./service";
+import { canAccessRoom } from "./room-access";
 import { IdentityProvider } from "../../infrastructure/auth/identity-provider";
 import { PlayerService } from "../players/player-service";
 import { logger } from "../../infrastructure/logging/logger";
+import type { Db } from "mongodb";
+
+const RATE_WINDOW_MS = 10_000;
+const RATE_MAX_MESSAGES = 20;
 
 export function initChatSocket(
   httpServer: HttpServer,
   chatService: ChatService,
   authProvider: IdentityProvider,
-  playerService: PlayerService
+  playerService: PlayerService,
+  db: Db
 ): SocketServer {
   const io = new SocketServer(httpServer, {
     cors: { origin: "*" }, // Adjust this in production
@@ -34,20 +40,27 @@ export function initChatSocket(
 
   io.on("connection", (socket: Socket) => {
     const playerId = socket.data.playerId as string;
-    
+    const sentAt: number[] = [];
+
     // Join a personal room based on playerId for direct targeting
     socket.join(playerId);
     logger.info("User connected", { playerId, socketId: socket.id });
+
+    const rateLimited = (): boolean => {
+      const now = Date.now();
+      while (sentAt.length > 0 && now - (sentAt[0] ?? 0) > RATE_WINDOW_MS) sentAt.shift();
+      if (sentAt.length >= RATE_MAX_MESSAGES) return true;
+      sentAt.push(now);
+      return false;
+    };
 
     // --- CHAT EVENTS ---
 
     socket.on("join_room", async (roomId: string) => {
       try {
-        if (roomId.startsWith("dm_")) {
-          if (!roomId.includes(playerId)) {
-            socket.emit("error", "Unauthorized to join this DM room");
-            return;
-          }
+        if (typeof roomId !== "string" || !(await canAccessRoom(db, playerId, roomId))) {
+          socket.emit("error", "Unauthorized to join this room");
+          return;
         }
         socket.join(roomId);
         logger.info("User joined room", { playerId, roomId });
@@ -58,10 +71,21 @@ export function initChatSocket(
       }
     });
 
-    socket.on("send_message", async (data: { roomId: string; content: string }) => {
+    socket.on("send_message", async (data: { roomId: string; content: string; replyToId?: string }) => {
       try {
-        if (!data.content.trim() || !data.roomId) return;
-        const message = await chatService.saveMessage(data.roomId, playerId, data.content);
+        if (!data || typeof data.content !== "string" || typeof data.roomId !== "string") return;
+        const content = data.content.trim();
+        if (!content || content.length > MAX_MESSAGE_LENGTH) return;
+        if (!(await canAccessRoom(db, playerId, data.roomId))) {
+          socket.emit("error", "Unauthorized to post in this room");
+          return;
+        }
+        if (rateLimited()) {
+          socket.emit("error", "You are sending messages too quickly");
+          return;
+        }
+        const replyToId = typeof data.replyToId === "string" && data.replyToId ? data.replyToId : undefined;
+        const message = await chatService.saveMessage(data.roomId, playerId, content, replyToId);
         io.to(data.roomId).emit("new_message", message);
       } catch (err) {
         logger.error("Error sending message", { error: String(err) });

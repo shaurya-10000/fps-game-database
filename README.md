@@ -2,7 +2,7 @@
 
 # 🎮 FPS Game Database
 
-**A cloud-deployed backend and web dashboard for competitive FPS games.**
+**A cloud-deployed backend for competitive FPS games.**
 
 Canonical match recording, transactional outbox, sequence-ordered Elo ratings, matchmaking, tournaments, moderation, real-time communications (chat, group chats, friends, WebRTC calls), and mode-aware XP progression, built so every match result is recorded once and only once, even when networks and workers fail.
 
@@ -12,7 +12,6 @@ Canonical match recording, transactional outbox, sequence-ordered Elo ratings, m
 [![MongoDB](https://img.shields.io/badge/MongoDB-Atlas-green?logo=mongodb)](https://www.mongodb.com/atlas)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org)
 [![Socket.io](https://img.shields.io/badge/Socket.io-4.0+-black?logo=socket.io)](https://socket.io)
-[![Next.js](https://img.shields.io/badge/Dashboard-Next.js_16-black?logo=nextdotjs)](#web-dashboard)
 
 [**Live API Health Check**](https://fps-game-database.onrender.com/health) · [**Report a bug**](https://github.com/shaurya-10000/fps-game-database/issues)
 
@@ -24,7 +23,7 @@ Canonical match recording, transactional outbox, sequence-ordered Elo ratings, m
 
 - [Highlights](#highlights)
 - [Features](#features)
-- [Web dashboard](#web-dashboard)
+- [Dashboard API](#dashboard-api)
 - [Architecture](#architecture)
 - [Chat API and socket events](#chat-api-and-socket-events)
 - [Game content catalog](#game-content-catalog)
@@ -45,7 +44,7 @@ Canonical match recording, transactional outbox, sequence-ordered Elo ratings, m
 - **Event-driven projections.** Ratings, XP, and leaderboards are derived asynchronously through a transactional outbox. They can be rebuilt from scratch without touching canonical data.
 - **Real-time communications.** Socket.io handles authenticated, bi-directional WebSocket connections for Global, Region, Group, and DM chat, and acts as a signaling relay for peer-to-peer WebRTC voice and video calls.
 - **Full-featured chat.** Group chats with admins, replies, reactions, edit and delete, pinned messages, server-side search, and paged history, with membership enforced on every room.
-- **Web dashboard.** A Next.js dashboard puts the whole platform in a browser: catalog, rankings, profile and progression, friends, chat, group chats, and voice and video calls.
+- **Dashboard-ready API.** Everything a player dashboard needs is served from here: catalog, rankings, profile and progression, friends, chat, group chats, and call signaling.
 - **Mode-aware progression.** The XP engine calculates rewards contextually: K/D matters in Team Deathmatch, survival time matters in Battle Royale, and the leveling curve gets progressively harder as players rank up.
 - **Strict ordering.** Per-player rating sequences are enforced atomically. Out-of-order events are deferred, duplicates are no-ops, and gaps block application until resolved.
 - **Security by design.** BOLA-safe responses (404 instead of 403), Zod-strict mass-assignment defense, JWT verification against a JWKS, socket-level JWT authentication, room-level access checks, and mid-session suspension enforcement.
@@ -72,50 +71,23 @@ Canonical match recording, transactional outbox, sequence-ordered Elo ratings, m
 | **WebRTC signaling** | Backend relay for peer-to-peer voice and video calls. Handles Offer, Answer, ICE candidate exchange, and call termination |
 | **Content catalog** | Versioned, typed catalog of maps, weapons (with ballistics), characters, throwables, equipment, and game modes; every match pins to a catalog version |
 | **Identity** | JWKS-validated JWTs, concurrent first-login safety, identity linking, account-status enforcement |
-| **Web dashboard** | Next.js app for the catalog, rankings, profile, friends, chat, group chats, and calls |
+| **Dashboard API** | The endpoints and real-time events behind a player dashboard: profile, friends, chat, group chats, and call signaling |
 | **Operations** | Migrations, deterministic seeding, index/validator/constraint verification, graceful shutdown, runbooks |
 
-## Web dashboard
+## Dashboard API
 
-The dashboard is a Next.js app that talks to this API and its WebSocket server. It is developed as its own project (`frontend`) and needs this backend running.
+A web dashboard for players is built on top of this backend. This service provides everything it needs:
 
-<!-- Add screenshots here once captured, for example:
-<p align="center"><img src="docs/images/dashboard-dms.png" alt="Direct messages" width="860" /></p>
--->
-
-| Area | What you can do |
+| Dashboard area | Provided by this backend |
 | :--- | :--- |
-| **Catalog** | Browse weapons (with full ballistics), maps, characters, equipment, throwables, and game modes |
-| **Rankings** | Read the cursor-paginated leaderboard |
-| **Profile** | See your level and XP progress, friend count, and edit your display name, username, and email |
-| **Friends** | Manage friends, requests, and blocks |
-| **Global chat** | Join the global room with voice messages |
-| **Direct messages** | Search and pin chats, reply, react, edit, delete, pin messages, search history, send voice messages and emoji, with optimistic sending and retry |
-| **Group chats** | Create groups from your friends, rename them, manage members, and leave |
-| **Calls** | Voice and video calls with pre-answer setup (mic, camera, screen share), a device menu, ringtones, and reconnect handling |
+| **Catalog** | Versioned catalog of weapons, maps, characters, equipment, throwables, and game modes |
+| **Rankings** | Cursor-paginated leaderboards from the rating projections |
+| **Profile** | Level and XP progress, profile and display name updates |
+| **Friends** | Friend requests, accept, block, and friend lists |
+| **Chat and group chats** | Rooms, history, search, pins, reactions, replies, edits, and deletes, plus group management (see [Chat API and socket events](#chat-api-and-socket-events)) |
+| **Calls** | WebRTC signaling relay for voice and video calls |
 
-### Running the dashboard
-
-From the dashboard project folder (`frontend`):
-
-```bash
-npm install
-cp .env.local.example .env.local   # then set the values below
-npm run dev
-```
-
-| Variable | Required | Purpose |
-| :--- | :--- | :--- |
-| `NEXT_PUBLIC_API_URL` | Yes | Base URL of this API and its WebSocket server (default `http://localhost:3000`) |
-| `MONGODB_URI` | Yes | Atlas connection string for the server-rendered catalog and ranking pages |
-| `NEXT_PUBLIC_TURN_URL`, `NEXT_PUBLIC_TURN_USERNAME`, `NEXT_PUBLIC_TURN_CREDENTIAL` | No | TURN relay so calls work across strict networks |
-
-> [!WARNING]
-> `.env.local` contains your database connection string. Keep it git-ignored and never commit it.
-
-### Calls
-
-Calls are peer-to-peer WebRTC; this API only relays the signaling. While a call is ringing you can set up your microphone, camera, and screen share before you answer. During a call you can switch microphone, camera, and speaker (speaker choice needs a Chromium-based browser), share your screen, go fullscreen, and use the keyboard: `M` mute, `V` camera, `S` share screen, `F` fullscreen, `Enter` accept. Incoming calls ring on every dashboard page. Group calls are not supported.
+Clients connect to the REST API and the WebSocket server on the same host (`http://localhost:3000` in development) and authenticate with the same JWT.
 
 ## Architecture
 
@@ -384,25 +356,11 @@ Weapon types, throwable types, character roles, game modes, and matchmaking buck
   <img src="https://img.shields.io/badge/JWT-000000?style=for-the-badge&logo=jsonwebtokens&logoColor=white" alt="JWT" />
 </p>
 
-### Real-time and media
+### Real-time and signaling
 
 <p>
   <img src="https://img.shields.io/badge/Socket.io-010101?style=for-the-badge&logo=socket.io&logoColor=white" alt="Socket.io" />
   <img src="https://img.shields.io/badge/WebRTC-333333?style=for-the-badge&logo=webrtc&logoColor=white" alt="WebRTC" />
-</p>
-
-### Dashboard
-
-<p>
-  <img src="https://img.shields.io/badge/Next.js-16-000000?style=for-the-badge&logo=nextdotjs&logoColor=white" alt="Next.js" />
-  <img src="https://img.shields.io/badge/React-19-61DAFB?style=for-the-badge&logo=react&logoColor=black" alt="React" />
-  <img src="https://img.shields.io/badge/TypeScript-5-3178C6?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript" />
-  <img src="https://img.shields.io/badge/Tailwind_CSS-4-06B6D4?style=for-the-badge&logo=tailwindcss&logoColor=white" alt="Tailwind CSS" />
-  <img src="https://img.shields.io/badge/Framer_Motion-0055FF?style=for-the-badge&logo=framer&logoColor=white" alt="Framer Motion" />
-  <img src="https://img.shields.io/badge/shadcn%2Fui-000000?style=for-the-badge&logo=shadcnui&logoColor=white" alt="shadcn/ui" />
-  <img src="https://img.shields.io/badge/Lucide-F56565?style=for-the-badge&logo=lucide&logoColor=white" alt="Lucide" />
-  <img src="https://img.shields.io/badge/Socket.io_Client-010101?style=for-the-badge&logo=socket.io&logoColor=white" alt="Socket.io client" />
-  <img src="https://img.shields.io/badge/ESLint-4B32C3?style=for-the-badge&logo=eslint&logoColor=white" alt="ESLint" />
 </p>
 
 ### Testing, CI and hosting
@@ -437,7 +395,7 @@ curl http://localhost:3000/health
 # {"status":"ok","env":"development"}
 ```
 
-To use the dashboard against it, see [Web dashboard](#web-dashboard).
+Clients, such as the player dashboard, connect to this address.
 
 ## Scripts
 
@@ -543,7 +501,7 @@ To report a vulnerability, please use GitHub's private vulnerability reporting o
 | Joining a room returns "Unauthorized" | You are not a participant or member | Open the DM through `/api/chat/dm-by-id/:playerId`, or ask to be added to the group |
 | Creating a second group with the same name fails | Old unique index still present | Restart the API once so it can replace the index |
 | WebRTC call fails to connect | STUN/TURN server unreachable | Check client ICE configuration; ensure both peers are online |
-| Calls work on one network but not across networks | No TURN relay configured | Provide a TURN server in the dashboard's `NEXT_PUBLIC_TURN_*` settings |
+| Calls work on one network but not across networks | No TURN relay configured | Provide a TURN server in the client's ICE configuration |
 
 ## License
 

@@ -2,6 +2,7 @@ import { Server as SocketServer, Socket } from "socket.io";
 import { Server as HttpServer } from "http";
 import { ChatService, MAX_MESSAGE_LENGTH } from "./service";
 import { canAccessRoom, roomRecipients } from "./room-access";
+import { friendIdsOf, presence } from "./presence";
 import { IdentityProvider } from "../../infrastructure/auth/identity-provider";
 import { PlayerService } from "../players/player-service";
 import { logger } from "../../infrastructure/logging/logger";
@@ -44,10 +45,25 @@ export function initChatSocket(
     const playerName = String(socket.data.playerName ?? playerId.slice(0, 8));
     const sentAt: number[] = [];
     const lastTyping = new Map<string, number>();
+    const lastRead = new Map<string, number>();
 
     // Join a personal room based on playerId for direct targeting
     socket.join(playerId);
     logger.info("User connected", { playerId, socketId: socket.id });
+
+    // Presence: tell the new socket who is online and tell friends when this player comes online.
+    const firstConnection = presence.connect(playerId);
+    void (async () => {
+      try {
+        const friends = await friendIdsOf(db, playerId);
+        socket.emit("presence_snapshot", { online: friends.filter((id) => presence.isOnline(id)) });
+        if (firstConnection) {
+          for (const id of friends) io.to(id).emit("presence", { playerId, online: true });
+        }
+      } catch (err) {
+        logger.warn("Presence announce failed", { error: String(err) });
+      }
+    })();
 
     const rateLimited = (): boolean => {
       const now = Date.now();
@@ -111,6 +127,24 @@ export function initChatSocket(
       }
     });
 
+    // Read receipts: remember how far this player has read and tell the room.
+    socket.on("mark_read", async (data: { roomId?: unknown }) => {
+      if (!data || typeof data.roomId !== "string" || !socket.rooms.has(data.roomId)) return;
+      const roomId = data.roomId;
+      const now = Date.now();
+      if (now - (lastRead.get(roomId) ?? 0) < 700) return;
+      lastRead.set(roomId, now);
+      try {
+        const at = new Date(now);
+        await db
+          .collection("chatReads")
+          .updateOne({ _id: `${roomId}:${playerId}` as never }, { $set: { roomId, playerId, at } }, { upsert: true });
+        socket.to(roomId).emit("read_receipt", { roomId, playerId, at });
+      } catch (err) {
+        logger.warn("mark_read failed", { error: String(err) });
+      }
+    });
+
     // Typing indicators are only relayed inside rooms this socket has joined, and throttled.
     socket.on("typing", (data: { roomId?: unknown; typing?: unknown }) => {
       if (!data || typeof data.roomId !== "string" || !socket.rooms.has(data.roomId)) return;
@@ -154,6 +188,13 @@ export function initChatSocket(
 
     socket.on("disconnect", () => {
       logger.info("User disconnected", { playerId, socketId: socket.id });
+      if (presence.disconnect(playerId)) {
+        void friendIdsOf(db, playerId)
+          .then((friends) => {
+            for (const id of friends) io.to(id).emit("presence", { playerId, online: false });
+          })
+          .catch((err: unknown) => logger.warn("Presence offline announce failed", { error: String(err) }));
+      }
     });
   });
 

@@ -361,6 +361,107 @@ export class ChatExtrasService {
     }
     io?.to(roomId).emit("message_reactions", { roomId, messageId, reactions: cleaned });
   }
+
+  // ------------------------------------------------- read state, unread, calls
+
+  /** When each participant last read this room. */
+  async reads(playerId: string, roomId: string): Promise<Record<string, string>> {
+    await this.requireAccess(playerId, roomId);
+    const docs = await this.db.collection("chatReads").find({ roomId }).toArray();
+    const out: Record<string, string> = {};
+    for (const doc of docs) out[String(doc["playerId"])] = new Date(doc["at"] as Date).toISOString();
+    return out;
+  }
+
+  /** Unread message counts (up to 99) for every DM and group the player is in. */
+  async unreadCounts(playerId: string): Promise<Record<string, number>> {
+    const friendDocs = await this.db
+      .collection("friendships")
+      .find({ fromPlayerId: playerId, status: "accepted" }, { projection: { toPlayerId: 1 } })
+      .toArray();
+    const dmRooms = friendDocs.map((f) => dmRoomId(playerId, String(f["toPlayerId"])));
+    const groupDocs = await this.rooms()
+      .find({ type: "group", members: playerId }, { projection: { _id: 1 } })
+      .toArray();
+    const roomIds = [...dmRooms, ...groupDocs.map((g) => g._id)];
+    if (roomIds.length === 0) return {};
+
+    const reads = this.db.collection("chatReads");
+    const known = new Map<string, Date>();
+    for (const doc of await reads.find({ playerId, roomId: { $in: roomIds } }).toArray()) {
+      known.set(String(doc["roomId"]), doc["at"] as Date);
+    }
+
+    // First time we see a room for this player: start counting from now instead of flooding them with old history.
+    const now = new Date();
+    const fresh = roomIds.filter((id) => !known.has(id));
+    if (fresh.length > 0) {
+      await reads.bulkWrite(
+        fresh.map((roomId) => ({
+          updateOne: {
+            filter: { _id: `${roomId}:${playerId}` as never },
+            update: { $setOnInsert: { roomId, playerId, at: now } },
+            upsert: true,
+          },
+        })),
+      );
+    }
+
+    const counts: Record<string, number> = {};
+    const withBaseline = roomIds.filter((id) => known.has(id));
+    for (let i = 0; i < withBaseline.length; i += 20) {
+      const batch = withBaseline.slice(i, i + 20);
+      const results = await Promise.all(
+        batch.map((roomId) =>
+          this.messages().countDocuments(
+            {
+              roomId,
+              senderId: { $ne: playerId },
+              system: { $ne: true },
+              deleted: { $ne: true },
+              createdAt: { $gt: known.get(roomId) as Date },
+            },
+            { limit: 99 },
+          ),
+        ),
+      );
+      batch.forEach((roomId, index) => {
+        const n = results[index] ?? 0;
+        if (n > 0) counts[roomId] = n;
+      });
+    }
+    return counts;
+  }
+
+  /** Records a finished call as a system message in the DM, so both people keep the history. */
+  async logCall(
+    callerId: string,
+    peerId: string,
+    call: { kind: "voice" | "video"; outcome: "completed" | "declined" | "no-answer" | "cancelled"; durationSec: number },
+    io: Io | null,
+  ): Promise<void> {
+    if (callerId === peerId) fail("INVALID_PAYLOAD");
+    if (!(await this.areFriends(callerId, [peerId]))) fail("NOT_FRIENDS");
+    const roomId = dmRoomId(callerId, peerId);
+    const label = call.kind === "video" ? "Video call" : "Voice call";
+    const msg = {
+      _id: `msg_${crypto.randomUUID()}`,
+      roomId,
+      senderId: callerId,
+      senderName: await this.nameOf(callerId),
+      content: label,
+      system: true,
+      call: { ...call, callerId },
+      createdAt: new Date(),
+    };
+    await this.messages().insertOne(msg);
+    io?.to(roomId).emit("new_message", msg);
+  }
+}
+
+function dmRoomId(a: string, b: string): string {
+  const sorted = [a, b].sort();
+  return `dm_${sorted[0]}_${sorted[1]}`;
 }
 
 // ---------------------------------------------------------------------- routes
@@ -372,6 +473,14 @@ const renameSchema = z.object({ name: nameSchema }).strict();
 const addSchema = z.object({ memberIds: idsSchema }).strict();
 const editSchema = z.object({ content: z.string().trim().min(1).max(MAX_MESSAGE_LENGTH) }).strict();
 const reactSchema = z.object({ emoji: z.string().min(1).max(16) }).strict();
+const callSchema = z
+  .object({
+    peerId: z.string().min(1).max(128),
+    kind: z.enum(["voice", "video"]),
+    outcome: z.enum(["completed", "declined", "no-answer", "cancelled"]),
+    durationSec: z.number().int().min(0).max(86400),
+  })
+  .strict();
 
 function param(req: Request, key: string): string {
   const raw = req.params[key];
@@ -407,6 +516,8 @@ function handle(err: unknown, res: Response): void {
 export function buildChatExtrasRouter(db: Db): Router {
   const router = Router();
   const service = new ChatExtrasService(db);
+  void db.collection("chatReads").createIndex({ roomId: 1 }).catch(() => undefined);
+  void db.collection("chatReads").createIndex({ playerId: 1 }).catch(() => undefined);
 
   const route =
     (fn: (req: Request, res: Response) => Promise<void>) =>
@@ -499,6 +610,21 @@ export function buildChatExtrasRouter(db: Db): Router {
   router.post("/chat/rooms/:roomId/messages/:messageId/reactions", route(async (req, res) => {
     const body = parse(reactSchema, req.body);
     await service.toggleReaction(playerOf(req), param(req, "roomId"), param(req, "messageId"), body.emoji, ioOf(req));
+    res.status(204).send();
+  }));
+
+  // ---- read state, unread counts, call log
+  router.get("/chat/rooms/:roomId/reads", route(async (req, res) => {
+    res.json({ reads: await service.reads(playerOf(req), param(req, "roomId")) });
+  }));
+
+  router.get("/chat/unread", route(async (req, res) => {
+    res.json({ counts: await service.unreadCounts(playerOf(req)) });
+  }));
+
+  router.post("/chat/calls", route(async (req, res) => {
+    const body = parse(callSchema, req.body);
+    await service.logCall(playerOf(req), body.peerId, { kind: body.kind, outcome: body.outcome, durationSec: body.durationSec }, ioOf(req));
     res.status(204).send();
   }));
 

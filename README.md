@@ -201,6 +201,9 @@ All routes are authenticated. Rooms are checked on every read and write: DM room
 | `DELETE` | `/api/chat/rooms/:roomId/messages/:messageId` | Delete for everyone (author, or group admin) |
 | `POST` | `/api/chat/rooms/:roomId/messages/:messageId/reactions` | Toggle a reaction: `{ emoji }` (fixed set of 8) |
 | `POST` | `/api/chat/rooms/:roomId/voice` | Upload a voice message (multipart) |
+| `GET` | `/api/chat/rooms/:roomId/reads` | When each participant last read the room |
+| `GET` | `/api/chat/unread` | Unread counts (up to 99) for your DMs and groups |
+| `POST` | `/api/chat/calls` | Save a finished call into the DM: `{ peerId, kind, outcome, durationSec }` |
 
 ### Socket events
 
@@ -214,9 +217,17 @@ All routes are authenticated. Rooms are checked on every read and write: DM room
 | Server to client | `message_reactions` | `{ roomId, messageId, reactions }` |
 | Server to client | `message_pinned` / `message_unpinned` | `{ roomId, messageId, pinned? }` |
 | Server to client | `group_updated` | `{ roomId }`, sent to current and removed members |
+| Client to server | `typing` | `{ roomId, typing }`, relayed to the others in that room (throttled) |
+| Server to client | `typing` | `{ roomId, playerId, name, typing }` |
+| Server to client | `chat_activity` | `{ roomId, kind, senderId, senderName, preview, messageId, createdAt }`, sent to the other members of a DM or group so clients can show unread badges |
+| Client to server | `mark_read` | `{ roomId }`, records how far you have read (throttled) |
+| Server to client | `read_receipt` | `{ roomId, playerId, at }` |
+| Server to client | `presence_snapshot`, `presence` | `{ online: string[] }` on connect, then `{ playerId, online }` as friends come and go |
 | Server to client | `error` | Human-readable string |
 | Client to server | `call_user`, `answer_call`, `ice_candidate`, `end_call` | WebRTC signaling payloads with `targetPlayerId` |
 | Server to client | `incoming_call`, `call_answered`, `ice_candidate`, `call_ended` | The same payloads, tagged with `fromPlayerId` |
+
+Presence is tracked in memory, so it is accurate per server instance. Run a single API instance, or add a shared store such as Redis before scaling out.
 
 ## Game content catalog
 
@@ -478,6 +489,7 @@ npm run start:worker
 - JWTs are verified against a JWKS with issuer, audience, and expiry checks.
 - WebSocket connections are authenticated using the same JWT middleware as HTTP.
 - Chat rooms are access-checked on every join, send, history, search, pin, edit, delete, reaction, and voice upload: DM rooms belong to their two participants and group rooms to their members.
+- Pinning is limited to DMs and groups, so nobody can pin messages in open rooms.
 - Message sending is rate limited per connection, and reactions are restricted to a fixed set so arbitrary text never becomes a database key.
 - Unauthorized access to another player's resources returns 404, not 403, to avoid leaking existence.
 - Blocking a player hides your presence from them and prevents future friend requests or DMs.

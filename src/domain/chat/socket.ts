@@ -99,6 +99,19 @@ export function initChatSocket(
           socket.emit("error", "Unauthorized to post in this room");
           return;
         }
+        // Direct messages only work between friends (blocking removes the friendship).
+        const recipients = await roomRecipients(db, data.roomId, playerId);
+        if (recipients?.kind === "dm") {
+          const friendship = await db.collection("friendships").countDocuments({
+            fromPlayerId: playerId,
+            toPlayerId: recipients.ids[0] ?? "",
+            status: "accepted",
+          });
+          if (friendship === 0) {
+            socket.emit("error", "You can only message friends.");
+            return;
+          }
+        }
         if (rateLimited()) {
           socket.emit("error", "You are sending messages too quickly");
           return;
@@ -108,7 +121,6 @@ export function initChatSocket(
         io.to(data.roomId).emit("new_message", message);
 
         // Tell the other participants (even if they have not opened this chat) so they can show unread badges.
-        const recipients = await roomRecipients(db, data.roomId, playerId);
         if (recipients) {
           const activity = {
             roomId: data.roomId,

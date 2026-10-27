@@ -23,6 +23,7 @@ import { Context } from "./infrastructure/auth/middleware";
 import { DmResolver } from "./domain/chat/dm-resolver";
 import { buildChatRouter } from "./domain/chat/routes";
 import { buildChatExtrasRouter } from "./domain/chat/chat-extras";
+import { buildProfileOverviewRouter } from "./domain/players/overview-routes";
 import { canAccessRoom } from "./domain/chat/room-access";
 import { AuthService } from "./domain/auth/auth-service";
 import { buildAuthRouter } from "./domain/auth/routes";
@@ -215,6 +216,7 @@ app.use("/api", authMiddleware, buildFriendsRouter(friendshipService));
 app.use("/api", authMiddleware, buildProgressionRouter(db));
 app.use("/api", authMiddleware, buildChatRouter(dmResolver));
 app.use("/api", authMiddleware, buildChatExtrasRouter(db));
+app.use("/api", authMiddleware, buildProfileOverviewRouter(db));
 app.use("/api", authMiddleware, buildLeaderboardRouter(leaderboardService));
 
 // Match result

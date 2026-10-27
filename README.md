@@ -82,7 +82,7 @@ A web dashboard for players is built on top of this backend. This service provid
 | :--- | :--- |
 | **Catalog** | Versioned catalog of weapons, maps, characters, equipment, throwables, and game modes |
 | **Rankings** | Cursor-paginated leaderboards from the rating projections |
-| **Profile** | Level and XP progress, profile and display name updates |
+| **Profile** | Level and XP progress, profile updates, and a single overview call (`GET /api/me/overview`) with rating, tier, rank, career stats, ranked record, rating history, and recent matches |
 | **Friends** | Friend requests, accept, block, and friend lists |
 | **Chat and group chats** | Rooms, history, search, pins, reactions, replies, edits, and deletes, plus group management (see [Chat API and socket events](#chat-api-and-socket-events)) |
 | **Calls** | WebRTC signaling relay for voice and video calls |
@@ -490,6 +490,7 @@ npm run start:worker
 - WebSocket connections are authenticated using the same JWT middleware as HTTP.
 - Chat rooms are access-checked on every join, send, history, search, pin, edit, delete, reaction, and voice upload: DM rooms belong to their two participants and group rooms to their members.
 - Pinning is limited to DMs and groups, so nobody can pin messages in open rooms.
+- Direct messages can only be sent between friends, checked on the server for every message.
 - Message sending is rate limited per connection, and reactions are restricted to a fixed set so arbitrary text never becomes a database key.
 - Unauthorized access to another player's resources returns 404, not 403, to avoid leaking existence.
 - Blocking a player hides your presence from them and prevents future friend requests or DMs.

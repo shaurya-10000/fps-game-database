@@ -12,6 +12,7 @@ import { CanonicalResultService } from "./domain/matches/canonical-service";
 import { PlayerService } from "./domain/players/player-service";
 import { FriendshipService } from "./domain/friends/friendship-service";
 import { buildFriendsRouter } from "./domain/friends/routes";
+import { buildFriendsExtrasRouter } from "./domain/friends/friends-extras-routes";
 import { ChatService } from "./domain/chat/service";
 import { initChatSocket } from "./domain/chat/socket";
 import { buildProgressionRouter } from "./domain/progression/routes";
@@ -213,6 +214,7 @@ app.post("/api/chat/groups-legacy", authMiddleware, async (req, res) => {
 
 // Mount Other Routers
 app.use("/api", authMiddleware, buildFriendsRouter(friendshipService));
+app.use("/api", authMiddleware, buildFriendsExtrasRouter(db));
 app.use("/api", authMiddleware, buildProgressionRouter(db));
 app.use("/api", authMiddleware, buildChatRouter(dmResolver));
 app.use("/api", authMiddleware, buildChatExtrasRouter(db));

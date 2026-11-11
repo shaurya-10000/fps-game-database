@@ -4,7 +4,7 @@
 
 **A cloud-deployed backend for competitive FPS games.**
 
-Canonical match recording, transactional outbox, sequence-ordered Elo ratings, matchmaking, tournaments, moderation, real-time communications (chat, group chats, friends, WebRTC calls), and mode-aware XP progression, built so every match result is recorded once and only once, even when networks and workers fail.
+Canonical match recording, transactional outbox, sequence-ordered Elo ratings, matchmaking, tournaments, moderation, real-time communications (chat, group chats, friends, WebRTC signaling) and mode-aware XP progression. Built so every match result is recorded once and only once, even when networks and workers fail.
 
 [![CI](https://github.com/shaurya-10000/fps-game-database/actions/workflows/ci.yml/badge.svg)](https://github.com/shaurya-10000/fps-game-database/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
@@ -13,9 +13,11 @@ Canonical match recording, transactional outbox, sequence-ordered Elo ratings, m
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org)
 [![Socket.io](https://img.shields.io/badge/Socket.io-4.0+-black?logo=socket.io)](https://socket.io)
 
-[**Live API Health Check**](https://fps-game-database.onrender.com/health) · [**Report a bug**](https://github.com/shaurya-10000/fps-game-database/issues)
+[**Live API health check**](https://fps-game-database.onrender.com/health) · [**Frontend repo**](https://github.com/shaurya-10000/fps-game-database-web) · [**Report a bug**](https://github.com/shaurya-10000/fps-game-database/issues)
 
 </div>
+
+> **Two repos, one product.** This repo is the backend: REST API, WebSocket server and background workers. The player dashboard lives in [`fps-game-database-web`](https://github.com/shaurya-10000/fps-game-database-web) (Next.js) and consumes everything documented here.
 
 ---
 
@@ -23,34 +25,35 @@ Canonical match recording, transactional outbox, sequence-ordered Elo ratings, m
 
 - [Highlights](#highlights)
 - [Features](#features)
-- [Dashboard API](#dashboard-api)
 - [Architecture](#architecture)
+- [REST API overview](#rest-api-overview)
 - [Chat API and socket events](#chat-api-and-socket-events)
 - [Game content catalog](#game-content-catalog)
 - [Core guarantees](#core-guarantees)
 - [Tech stack](#tech-stack)
 - [Quick start](#quick-start)
+- [Environment variables](#environment-variables)
 - [Scripts](#scripts)
 - [Testing](#testing)
 - [Deployment](#deployment)
 - [Operations and documentation](#operations-and-documentation)
 - [Security](#security)
 - [Troubleshooting](#troubleshooting)
+- [Known limitations](#known-limitations)
 - [License](#license)
 
 ## Highlights
 
 - **Exactly-once effect.** Match results are recorded once, even if clients retry, networks drop acknowledgements, or workers crash mid-flight.
-- **Event-driven projections.** Ratings, XP, and leaderboards are derived asynchronously through a transactional outbox. They can be rebuilt from scratch without touching canonical data.
-- **Real-time communications.** Socket.io handles authenticated, bi-directional WebSocket connections for Global, Region, Group, and DM chat, and acts as a signaling relay for peer-to-peer WebRTC voice and video calls.
-- **Full-featured chat.** Group chats with admins, replies, reactions, edit and delete, pinned messages, server-side search, and paged history, with membership enforced on every room.
-- **Dashboard-ready API.** Everything a player dashboard needs is served from here: catalog, rankings, profile and progression, friends, chat, group chats, and call signaling.
-- **Mode-aware progression.** The XP engine calculates rewards contextually: K/D matters in Team Deathmatch, survival time matters in Battle Royale, and the leveling curve gets progressively harder as players rank up.
+- **Event-driven projections.** Ratings, XP and leaderboards are derived asynchronously through a transactional outbox and can be rebuilt from scratch without touching canonical data.
 - **Strict ordering.** Per-player rating sequences are enforced atomically. Out-of-order events are deferred, duplicates are no-ops, and gaps block application until resolved.
-- **Security by design.** BOLA-safe responses (404 instead of 403), Zod-strict mass-assignment defense, JWT verification against a JWKS, socket-level JWT authentication, room-level access checks, and mid-session suspension enforcement.
-- **Typed game content model.** Maps, weapons with full ballistics, characters, throwables, equipment, and game modes are strictly typed TypeScript domain models, seeded into versioned catalogs that matches pin to.
-- **Deployed and running.** The REST API and WebSocket server run on Render against a managed MongoDB Atlas cluster. Background workers run separately from the HTTP server.
-- **Tested against a real database.** 106 passing tests (24 unit, 82 integration) cover concurrency, failure injection, crash recovery, social graph race conditions, and state machines. Integration tests use real MongoDB transactions, not mocks.
+- **Real-time communications.** Authenticated Socket.IO connections power Global, Region, Group and DM chat, and act as a signaling relay for peer-to-peer WebRTC voice and video calls.
+- **Full-featured chat.** Group chats with admins, replies, reactions, edit and delete, pins, server-side search and paged history, with membership enforced on every room.
+- **Mode-aware progression.** K/D matters in Team Deathmatch, survival time in Battle Royale, and the leveling curve gets harder as players rank up.
+- **Security by design.** BOLA-safe responses (404, not 403), Zod-strict mass-assignment defense, JWT verification against a JWKS, socket-level JWT auth, room-level access checks and mid-session suspension enforcement.
+- **Typed game content.** Maps, weapons with full ballistics, characters, throwables, equipment and modes are strictly typed domain models, seeded into versioned catalogs that every match pins to.
+- **Deployed and running.** The API and WebSocket server run on Render against a managed MongoDB Atlas cluster; background workers run as a separate process.
+- **Tested against a real database.** 106 passing tests (24 unit, 82 integration) cover concurrency, failure injection, crash recovery, social-graph races and state machines. Integration tests use real MongoDB transactions, not mocks.
 
 ## Features
 
@@ -58,47 +61,33 @@ Canonical match recording, transactional outbox, sequence-ordered Elo ratings, m
 | :--- | :--- |
 | **Canonical match results** | Versioned content catalog, match lifecycle state machine, idempotent result submission, ambiguous-commit resolution |
 | **Outbox and consumers** | Lease-based claiming, exponential backoff with jitter, dead-lettering with replay, backpressure monitoring |
-| **Competitive ratings** | Elo rating algorithm, tier derivation, audited rating corrections, season lifecycle |
+| **Competitive ratings** | Elo algorithm, tier derivation, audited rating corrections, season lifecycle |
 | **Progression and XP** | Mode-aware XP calculation, progressive leveling curve, transaction-safe multi-level-ups |
-| **Stats and economy** | Rebuildable projections, cursor-paginated leaderboards, idempotent inventory grants, progression (XP) ledger |
-| **Matchmaking** | Ticket state machine, atomic allocation, partial-claim prevention, cancellation-vs-allocation race handling, allocator crash recovery |
+| **Stats and economy** | Rebuildable projections, cursor-paginated leaderboards, idempotent inventory grants, XP ledger |
+| **Matchmaking** | Ticket state machine, atomic allocation, partial-claim prevention, cancel-vs-allocate race handling, allocator crash recovery |
 | **Tournaments** | Immutable bracket revisions, idempotent bracket advancement |
 | **Moderation and audit** | Report and sanction workflow, audit events, admin route separation |
-| **Social graph** | Friendships with mutual auto-accept, directional blocking (dominant over friendships), BOLA-safe error surfaces, in-flight request caps |
-| **Real-time chat** | Authenticated WebSocket connections via Socket.io. Global and Region rooms, deterministic Direct Messages (DMs), live updates for edits, deletes, reactions, and pins |
-| **Group chats** | Create from friends, rename, add and remove members, leave. Creator is admin, admin role is handed on when the last admin leaves. System notices for membership changes |
-| **Message features** | Replies with quoted previews, 8 fixed reactions, edit, delete for everyone, pinned messages (50 per room), server-side search, paged history, voice messages |
-| **WebRTC signaling** | Backend relay for peer-to-peer voice and video calls. Handles Offer, Answer, ICE candidate exchange, and call termination |
-| **Content catalog** | Versioned, typed catalog of maps, weapons (with ballistics), characters, throwables, equipment, and game modes; every match pins to a catalog version |
+| **Social graph** | Friendships with mutual auto-accept, directional blocking (dominant over friendships), mutes, BOLA-safe error surfaces, in-flight request caps |
+| **Real-time chat** | Global and Region rooms, deterministic DMs, live updates for edits, deletes, reactions and pins, typing, read receipts, presence |
+| **Group chats** | Create from friends, rename, add and remove members, leave. Creator is admin; admin role passes on when the last admin leaves; system notices for membership changes |
+| **Message features** | Replies with quoted previews, 8 fixed reactions, edit, delete for everyone, pins (50 per room), server-side search, paged history, voice messages |
+| **WebRTC signaling** | In-memory relay of offer, answer, ICE candidates and call termination |
+| **Content catalog** | Versioned, typed catalog of maps, weapons, characters, throwables, equipment and modes |
 | **Identity** | JWKS-validated JWTs, concurrent first-login safety, identity linking, account-status enforcement |
-| **Dashboard API** | The endpoints and real-time events behind a player dashboard: profile, friends, chat, group chats, and call signaling |
-| **Operations** | Migrations, deterministic seeding, index/validator/constraint verification, graceful shutdown, runbooks |
+| **Operations** | Migrations, deterministic seeding, index / validator / constraint verification, graceful shutdown, runbooks |
 
-## Dashboard API
-
-A web dashboard for players is built on top of this backend. This service provides everything it needs:
-
-| Dashboard area | Provided by this backend |
-| :--- | :--- |
-| **Catalog** | Versioned catalog of weapons, maps, characters, equipment, throwables, and game modes |
-| **Rankings** | Cursor-paginated leaderboards from the rating projections |
-| **Profile** | Level and XP progress, profile updates, and a single overview call (`GET /api/me/overview`) with rating, tier, rank, career stats, ranked record, rating history, and recent matches |
-| **Friends** | Friend requests, accept, block, and friend lists |
-| **Chat and group chats** | Rooms, history, search, pins, reactions, replies, edits, and deletes, plus group management (see [Chat API and socket events](#chat-api-and-socket-events)) |
-| **Calls** | WebRTC signaling relay for voice and video calls |
-
-Clients connect to the REST API and the WebSocket server on the same host (`http://localhost:3000` in development) and authenticate with the same JWT.
+---
 
 ## Architecture
 
-Canonical truth, event-driven projections, and real-time communications.
+Canonical truth, event-driven projections and real-time communications.
 
 ```mermaid
 flowchart TD
-    C["Clients<br/>(Dashboard, HTTP POST / WebSocket)"] --> A["JWT auth middleware<br/>Socket.io middleware"]
+    C["Clients<br/>(dashboard: HTTP and WebSocket)"] --> A["JWT auth middleware<br/>Socket.IO auth middleware"]
 
     A --> T["Canonical transaction (MongoDB)<br/>matches, matchParticipants, outboxEvents,<br/>outboxDeliveries, idempotencyRecords"]
-    A --> R["Real-time chat (Socket.io)<br/>chatRooms, chatMessages,<br/>WebRTC signaling relay"]
+    A --> R["Real-time (Socket.IO)<br/>chatRooms, chatMessages,<br/>WebRTC signaling relay"]
 
     R -.-> P2P["Peer-to-peer audio / video"]
 
@@ -107,57 +96,10 @@ flowchart TD
     RP --> V[("Read models<br/>competitiveRatings<br/>progressionProfiles")]
 ```
 
-<details>
-<summary>Plain-text version of the diagram</summary>
-
-```text
-Clients (Dashboard, HTTP POST / WebSocket)
-       |
-       v
-[JWT Auth Middleware / Socket.io Middleware]
-       |
-       +---------------------------------------+
-       |                                       |
-       v                                       v
-+---------------------------------------+  +---------------------------------------+
-|  Canonical Transaction (MongoDB)      |  |  Real-time Chat (Socket.io)           |
-|  ---------------------------------    |  |  ---------------------------------    |
-|  matches (status: completed)          |  |  chatRooms (global, region, group)    |
-|  matchParticipants (N documents)      |  |  chatMessages (indexed by room/time)  |
-|  outboxEvents (1 MATCH_COMPLETED)     |  |  WebRTC Signaling (P2P relay)         |
-|  outboxDeliveries (1 per consumer)    |  +---------------------------------------+
-|  idempotencyRecords (fingerprint)     |                      |
-+---------------------------------------+                      v
-       |                                             Peer-to-Peer Audio/Video
-       v
-+---------------------------------------+
-|  Outbox Relay (lease-based claim)     |
-|  ---------------------------------    |
-|  Exponential backoff + jitter         |
-|  Stale-worker protection              |
-|  Dead-letter + replay script          |
-+---------------------------------------+
-       |
-       v
-+---------------------------------------+
-|  Consumers (atomic)                   |
-|  ---------------------------------    |
-|  Rating Processor (Elo)               |
-|  Progression (XP Engine)              |
-|  Statistics                           |
-+---------------------------------------+
-       |
-       v
-  competitiveRatings, progressionProfiles
-  (read models)
-```
-
-</details>
-
 ### Design principles
 
-1. **One transactional write path.** A match result, its participants, its outbox event, its per-consumer deliveries, and its idempotency record commit together or not at all.
-2. **Real-time is stateless.** Chat messages are persisted, but WebRTC call signaling is relayed in-memory for maximum speed and minimal database load.
+1. **One transactional write path.** A match result, its participants, its outbox event, its per-consumer deliveries and its idempotency record commit together or not at all.
+2. **Real-time is stateless.** Chat messages are persisted, but WebRTC signaling is relayed in memory for speed and minimal database load.
 3. **Projections are disposable.** Read models can be rebuilt from canonical data.
 4. **At-least-once delivery, exactly-once effect.** The relay may redeliver; consumers are idempotent and enforce ordering.
 5. **Fail closed.** Unknown fields are rejected, unauthorized access looks like absence, and ambiguous states are resolved explicitly.
@@ -172,17 +114,35 @@ Clients (Dashboard, HTTP POST / WebSocket)
 | Relay worker crashes mid-delivery | Lease expires, another worker claims; the stale worker is fenced out |
 | Consumer keeps failing | Backoff with jitter, then dead-letter; replay with a script |
 | Rating event arrives out of order | Gap detected; application deferred until order is restored |
-| Concurrent friend accept | Unique index on reverse direction ensures exactly one pair is created |
-| Socket connection drops | Client auto-reconnects via Socket.io, re-authenticates, and rejoins rooms |
-| WebRTC target offline | Signaling event is dropped; client times out waiting for Answer |
-| Player levels up multiple times in one match | Transaction-safe loop applies levels until the XP is spent |
+| Concurrent friend accept | Unique index on the reverse direction ensures exactly one pair is created |
+| Socket connection drops | Client auto-reconnects, re-authenticates and rejoins rooms |
+| WebRTC target offline | Signaling event is dropped; the caller times out waiting for an answer |
+| Player levels up several times in one match | Transaction-safe loop applies levels until the XP is spent |
 | Member removed from a group | Their live sockets leave the room immediately, so no further messages are delivered |
+
+---
+
+## REST API overview
+
+All routes except health and login/register require `Authorization: Bearer <JWT>`. Clients connect to the REST API and WebSocket server on the same host (`http://localhost:3000` in development) with the same JWT. The chat routes are detailed [below](#chat-api-and-socket-events).
+
+| Area | Endpoints |
+| :--- | :--- |
+| **Health** | `GET /health` |
+| **Auth** | `POST /api/auth/login`, `POST /api/auth/register` |
+| **Profile** | `GET` / `PATCH /api/me/profile`, `GET /api/me/progression`, `GET /api/me/overview` (rating, tier, rank, career stats, ranked record, rating history, recent matches) |
+| **Friends** | `GET /api/me/friends`, `GET /api/me/friends/requests`, `GET /api/me/friends/requests/outgoing`, `POST /api/me/friends/requests`, `POST /api/me/friends/requests/:fromPlayerId/accept`, `DELETE /api/me/friends/requests/:otherId`, `DELETE /api/me/friends/:otherId` |
+| **Search** | `GET /api/me/players/search?q=` |
+| **Blocks and mutes** | `GET` / `POST /api/me/blocks`, `DELETE /api/me/blocks/:playerId`, `GET` / `POST /api/me/mutes`, `DELETE /api/me/mutes/:playerId` |
+| **Leaderboards** | `GET /api/leaderboards` (cursor-paginated), `/global`, `/friends`, `/region/:region` |
+| **Chat** | See [Chat API and socket events](#chat-api-and-socket-events) |
 
 ## Chat API and socket events
 
-All routes are authenticated. Rooms are checked on every read and write: DM rooms belong to their two participants, group rooms to their members, Global and Region rooms are open.
+All routes are authenticated. Rooms are checked on every read and write: DM rooms belong to their two participants, group rooms to their members, and Global and Region rooms are open.
 
-### REST
+<details open>
+<summary><strong>REST</strong></summary>
 
 | Method | Path | Purpose |
 | :--- | :--- | :--- |
@@ -192,7 +152,7 @@ All routes are authenticated. Rooms are checked on every read and write: DM room
 | `GET` | `/api/chat/groups/:roomId` | Group details and members |
 | `PATCH` | `/api/chat/groups/:roomId` | Rename (admin): `{ name }` |
 | `POST` | `/api/chat/groups/:roomId/members` | Add friends: `{ memberIds }` |
-| `DELETE` | `/api/chat/groups/:roomId/members/:playerId` | Remove a member (admin), or leave (yourself) |
+| `DELETE` | `/api/chat/groups/:roomId/members/:playerId` | Remove a member (admin) or leave (yourself) |
 | `GET` | `/api/chat/rooms/:roomId/history` | Older messages: `?before=<ISO>&limit=` (max 100) |
 | `GET` | `/api/chat/rooms/:roomId/search` | Search messages: `?q=` (2 to 100 characters) |
 | `GET` | `/api/chat/rooms/:roomId/pins` | Pinned messages |
@@ -205,35 +165,44 @@ All routes are authenticated. Rooms are checked on every read and write: DM room
 | `GET` | `/api/chat/unread` | Unread counts (up to 99) for your DMs and groups |
 | `POST` | `/api/chat/calls` | Save a finished call into the DM: `{ peerId, kind, outcome, durationSec }` |
 
-### Socket events
+</details>
+
+<details open>
+<summary><strong>Socket events</strong></summary>
 
 | Direction | Event | Payload |
 | :--- | :--- | :--- |
-| Client to server | `join_room` | `roomId` |
-| Client to server | `send_message` | `{ roomId, content, replyToId? }` (max 2000 characters, rate limited to 20 per 10 seconds) |
-| Server to client | `room_history` | Latest 50 messages, oldest first |
-| Server to client | `new_message` | Message, including system notices |
-| Server to client | `message_edited` / `message_deleted` | `{ roomId, messageId, ... }` |
-| Server to client | `message_reactions` | `{ roomId, messageId, reactions }` |
-| Server to client | `message_pinned` / `message_unpinned` | `{ roomId, messageId, pinned? }` |
-| Server to client | `group_updated` | `{ roomId }`, sent to current and removed members |
-| Client to server | `typing` | `{ roomId, typing }`, relayed to the others in that room (throttled) |
-| Server to client | `typing` | `{ roomId, playerId, name, typing }` |
-| Server to client | `chat_activity` | `{ roomId, kind, senderId, senderName, preview, messageId, createdAt }`, sent to the other members of a DM or group so clients can show unread badges |
-| Client to server | `mark_read` | `{ roomId }`, records how far you have read (throttled) |
-| Server to client | `read_receipt` | `{ roomId, playerId, at }` |
-| Server to client | `presence_snapshot`, `presence` | `{ online: string[] }` on connect, then `{ playerId, online }` as friends come and go |
-| Server to client | `error` | Human-readable string |
-| Client to server | `call_user`, `answer_call`, `ice_candidate`, `end_call` | WebRTC signaling payloads with `targetPlayerId` |
-| Server to client | `incoming_call`, `call_answered`, `ice_candidate`, `call_ended` | The same payloads, tagged with `fromPlayerId` |
+| Client → server | `join_room` | `roomId` |
+| Client → server | `send_message` | `{ roomId, content, replyToId? }` (max 2000 characters, rate limited to 20 per 10 s) |
+| Client → server | `typing` | `{ roomId, typing }`, relayed to others in the room (throttled) |
+| Client → server | `mark_read` | `{ roomId }`, records how far you have read (throttled) |
+| Client → server | `call_user`, `answer_call`, `ice_candidate`, `end_call` | WebRTC signaling payloads with `targetPlayerId` |
+| Server → client | `room_history` | Latest 50 messages, oldest first |
+| Server → client | `new_message` | Message, including system notices |
+| Server → client | `message_edited`, `message_deleted` | `{ roomId, messageId, ... }` |
+| Server → client | `message_reactions` | `{ roomId, messageId, reactions }` |
+| Server → client | `message_pinned`, `message_unpinned` | `{ roomId, messageId, pinned? }` |
+| Server → client | `group_updated` | `{ roomId }`, sent to current and removed members |
+| Server → client | `typing` | `{ roomId, playerId, name, typing }` |
+| Server → client | `chat_activity` | `{ roomId, kind, senderId, senderName, preview, messageId, createdAt }`, sent to the other members of a DM or group for unread badges |
+| Server → client | `read_receipt` | `{ roomId, playerId, at }` |
+| Server → client | `presence_snapshot`, `presence` | `{ online: string[] }` on connect, then `{ playerId, online }` as friends come and go |
+| Server → client | `incoming_call`, `call_answered`, `ice_candidate`, `call_ended` | The signaling payloads, tagged with `fromPlayerId` |
+| Server → client | `error` | Human-readable string |
 
-Presence is tracked in memory, so it is accurate per server instance. Run a single API instance, or add a shared store such as Redis before scaling out.
+</details>
+
+> [!NOTE]
+> Presence is tracked in memory, so it is accurate per server instance. Run a single API instance, or add a shared store such as Redis before scaling out.
+
+---
 
 ## Game content catalog
 
-The database is seeded with a full, original-IP content catalog, showing it can model rich relational game data: weapons, economy, maps, and characters. Every match is pinned to a catalog version, so results keep resolving correctly even after the catalog changes (`v2` extends `v1`). The tables below describe the `v1` catalog.
+The database is seeded with a full, original-IP catalog that shows it can model rich relational game data. Every match is pinned to a catalog version, so results keep resolving correctly after the catalog changes (`v2` extends `v1`). The tables below describe `v1`.
 
-### 🗺️ Maps (10)
+<details>
+<summary><strong>🗺️ Maps (10)</strong></summary>
 
 | Name | Size | Supported modes |
 | :--- | :--- | :--- |
@@ -248,9 +217,12 @@ The database is seeded with a full, original-IP content catalog, showing it can 
 | **Crosswinds** | Small | Free-for-All, Team Deathmatch |
 | **Undertow** | Large | Bomb Defusal, Battle Royale |
 
-### 🔫 Weapons (35)
+</details>
 
-Five weapons per category. Every weapon carries a full ballistics profile, not just a damage number.
+<details>
+<summary><strong>🔫 Weapons (35)</strong></summary>
+
+Five weapons per category, each with a full ballistics profile rather than a single damage number.
 
 | Stat | Meaning |
 | :--- | :--- |
@@ -264,7 +236,7 @@ Five weapons per category. Every weapon carries a full ballistics profile, not j
 | `spread` | Base inaccuracy in degrees |
 | `penetration` | 0 none, 1 low, 2 medium, 3 high |
 
-One representative weapon per category (full data lives in `src/domain/catalog/data.ts`):
+One representative weapon per category (full data in `src/domain/catalog/data.ts`):
 
 | Weapon | Type | Damage (min) | RPM | Mag | Reload | HS × | Range (falloff) | Recoil V/H | Spread | Pen |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
@@ -286,9 +258,10 @@ One representative weapon per category (full data lives in `src/domain/catalog/d
 | **Shotgun** | Thunder, Striker, Scattershot, Breaker, Bastion |
 | **Melee** | Tactical Blade, Void Edge Dagger, Rift Cleaver, Ironfang, Nightreaver |
 
-### 🧑‍🚀 Characters (25)
+</details>
 
-Five characters per role class.
+<details>
+<summary><strong>🧑‍🚀 Characters (25), 💣 throwables (8) and 🛡️ equipment (13)</strong></summary>
 
 | Role | Characters |
 | :--- | :--- |
@@ -298,14 +271,14 @@ Five characters per role class.
 | **Support** | Vital, Lifeline, Mender, Symbiotic, Halo |
 | **Tank** | Bulwark, Foundation, Ironhide, Anchor, Stonewall |
 
-### 💣 Throwables and 🛡️ Equipment
-
 - **Throwables (8):** Shattercore, Veilcloud, Blindlight, Cinderwave, Phantom Echo, Nullburst, Lifebloom, Quakejaw.
-- **Equipment (13):** 3 armor levels (Light, Medium, Heavy), 3 helmet levels, 6 ammo types (one per ranged weapon class), and 1 med kit.
+- **Equipment (13):** 3 armor levels (Light, Medium, Heavy), 3 helmet levels, 6 ammo types (one per ranged weapon class) and 1 med kit.
 
-### 🎮 Game modes and matchmaking (2 buckets × 4 modes)
+</details>
 
-Matchmaking supports **Ranked** and **Unranked** buckets across four core modes. XP is calculated contextually depending on the mode.
+### 🎮 Game modes and matchmaking
+
+Matchmaking supports **Ranked** and **Unranked** buckets across four core modes (2 buckets × 4 modes). XP is calculated contextually per mode.
 
 | Mode | Team size | Rounds | XP priority |
 | :--- | :--- | :--- | :--- |
@@ -316,7 +289,7 @@ Matchmaking supports **Ranked** and **Unranked** buckets across four core modes.
 
 ### Content model
 
-The catalog is a strictly typed domain model. Weapon stats, for example:
+The catalog is a strictly typed domain model:
 
 ```ts
 export interface WeaponStats {
@@ -337,7 +310,9 @@ export interface WeaponStats {
 }
 ```
 
-Weapon types, throwable types, character roles, game modes, and matchmaking buckets are closed union types, so an invalid value fails at compile time rather than at runtime. Seed the catalog with `npm run seed:catalog`.
+Weapon types, throwable types, character roles, game modes and matchmaking buckets are closed union types, so an invalid value fails at compile time rather than at runtime. Seed the catalog with `npm run seed:catalog`.
+
+---
 
 ## Core guarantees
 
@@ -345,57 +320,38 @@ Weapon types, throwable types, character roles, game modes, and matchmaking buck
 | :--- | :--- |
 | Zero duplicate canonical records under concurrent submission | 20-parallel test (`duplicate-load.test.ts`) |
 | Full transaction rollback on any failure point | Failure injection (`canonical-result.test.ts`) |
-| Ambiguous commit resolution (network drops ACK) | `ambiguous-commit.test.ts` |
+| Ambiguous-commit resolution (network drops the ACK) | `ambiguous-commit.test.ts` |
 | Exactly-once rating across crashes and retries | Worker crash recovery test |
 | No out-of-order application | Sequence gap detection test |
-| BOLA protection (404, not 403, on unauthorized) | `auth-middleware.test.ts` |
+| BOLA protection (404, not 403, on unauthorized access) | `auth-middleware.test.ts` |
 | Mass-assignment rejection at DB and API layer | Zod `.strict()` + `additionalProperties: false` |
 | Mid-session account suspension enforcement | High-risk route re-check test |
 | Exactly-once friendship creation under concurrent accept | `friends.test.ts` |
-| Block prevents future requests in both directions | `friends.test.ts` |
+| Blocking prevents future requests in both directions | `friends.test.ts` |
 
 ## Tech stack
 
-### Backend and data
+| Layer | Technology |
+| :--- | :--- |
+| **Runtime and language** | Node.js 20.19+, TypeScript (strict), Express |
+| **Data** | MongoDB Atlas (replica set, multi-document transactions) |
+| **Validation and auth** | Zod, JWT verified against a JWKS |
+| **Real-time** | Socket.IO, WebRTC (signaling only) |
+| **Testing and CI** | Vitest, GitHub Actions |
+| **Hosting** | Render (web service and background worker), MongoDB Atlas |
 
-<p>
-  <img src="https://img.shields.io/badge/Node.js-20.19+-339933?style=for-the-badge&logo=node.js&logoColor=white" alt="Node.js" />
-  <img src="https://img.shields.io/badge/TypeScript-strict-3178C6?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript" />
-  <img src="https://img.shields.io/badge/Express-000000?style=for-the-badge&logo=express&logoColor=white" alt="Express" />
-  <img src="https://img.shields.io/badge/MongoDB_Atlas-47A248?style=for-the-badge&logo=mongodb&logoColor=white" alt="MongoDB Atlas" />
-  <img src="https://img.shields.io/badge/Zod-3E67B1?style=for-the-badge&logo=zod&logoColor=white" alt="Zod" />
-  <img src="https://img.shields.io/badge/JWT-000000?style=for-the-badge&logo=jsonwebtokens&logoColor=white" alt="JWT" />
-</p>
-
-### Real-time and signaling
-
-<p>
-  <img src="https://img.shields.io/badge/Socket.io-010101?style=for-the-badge&logo=socket.io&logoColor=white" alt="Socket.io" />
-  <img src="https://img.shields.io/badge/WebRTC-333333?style=for-the-badge&logo=webrtc&logoColor=white" alt="WebRTC" />
-</p>
-
-### Testing, CI and hosting
-
-<p>
-  <img src="https://img.shields.io/badge/Vitest-6E9F18?style=for-the-badge&logo=vitest&logoColor=white" alt="Vitest" />
-  <img src="https://img.shields.io/badge/GitHub_Actions-2088FF?style=for-the-badge&logo=githubactions&logoColor=white" alt="GitHub Actions" />
-  <img src="https://img.shields.io/badge/Render-46E3B7?style=for-the-badge&logo=render&logoColor=black" alt="Render" />
-</p>
+---
 
 ## Quick start
 
-**Prerequisites:** Node.js **20.19.0+**, npm, and a MongoDB Atlas cluster. Every Atlas cluster, including the free tier, is a replica set, which multi-document transactions require.
+**Prerequisites:** Node.js **20.19.0+**, npm, and a MongoDB Atlas cluster. Every Atlas cluster, including the free tier, is a replica set, which multi-document transactions require. A standalone `mongod` will not work.
 
 ```bash
 git clone https://github.com/shaurya-10000/fps-game-database.git
 cd fps-game-database
 npm install
 cp .env.example .env        # set MONGODB_URI to your Atlas connection string
-```
-
-Run the API locally:
-
-```bash
+npm run seed:catalog        # seed the versioned content catalog
 npm run dev
 ```
 
@@ -406,7 +362,26 @@ curl http://localhost:3000/health
 # {"status":"ok","env":"development"}
 ```
 
-Clients, such as the player dashboard, connect to this address.
+To run ratings and progression locally, start the worker in a second terminal:
+
+```bash
+npm run start:worker
+```
+
+> [!TIP]
+> The [web frontend](https://github.com/shaurya-10000/fps-game-database-web) defaults to this backend at `http://localhost:3000`. Run the frontend on another port (for example `npm run dev -- -p 3001`) and allow that origin in this API's CORS configuration.
+
+## Environment variables
+
+| Variable | Required | Purpose |
+| :--- | :---: | :--- |
+| `MONGODB_URI` | ✅ | Atlas connection string |
+| `NODE_ENV` | ✅ in production | `development` or `production` |
+| `AUTH_JWKS_URI` | ✅ in production | JWKS endpoint used to verify JWT signatures |
+| `AUTH_ISSUER` | ✅ in production | Expected token issuer |
+| `AUTH_AUDIENCE` | ✅ in production | Expected token audience |
+
+See `.env.example` for the full list and local defaults.
 
 ## Scripts
 
@@ -442,9 +417,7 @@ npm run test:integration  # Integration tests (requires Atlas)
 > [!WARNING]
 > Integration tests need a valid `MONGODB_URI` in `.env` and run heavy concurrent operations against your Atlas cluster. Use a dedicated or disposable cluster, not data you care about.
 
-Catalog tests assert exact content counts (10 maps, 35 weapons, 25 characters, 8 throwables, 13 equipment items, 4 game modes), five weapons per type, five characters per role, complete ballistics on every weapon, and game-mode rules such as the 7-round 5v5 Bomb Defusal.
-
-Coverage includes concurrent duplicate submission, transaction rollback via failure injection, lost-ACK recovery, worker crash recovery, sequence ordering, matchmaking races, bracket idempotency, concurrent friend accept, directional blocking, and authorization boundaries.
+Coverage includes concurrent duplicate submission, transaction rollback via failure injection, lost-ACK recovery, worker crash recovery, sequence ordering, matchmaking races, bracket idempotency, concurrent friend accept, directional blocking and authorization boundaries. Catalog tests assert exact content counts (10 maps, 35 weapons, 25 characters, 8 throwables, 13 equipment items, 4 game modes), five weapons per type, five characters per role, complete ballistics on every weapon, and mode rules such as the 7-round 5v5 Bomb Defusal.
 
 ## Deployment
 
@@ -486,19 +459,19 @@ npm run start:worker
 
 ## Security
 
-- JWTs are verified against a JWKS with issuer, audience, and expiry checks.
-- WebSocket connections are authenticated using the same JWT middleware as HTTP.
-- Chat rooms are access-checked on every join, send, history, search, pin, edit, delete, reaction, and voice upload: DM rooms belong to their two participants and group rooms to their members.
+- JWTs are verified against a JWKS with issuer, audience and expiry checks.
+- WebSocket connections use the same JWT authentication as HTTP.
+- Chat rooms are access-checked on every join, send, history, search, pin, edit, delete, reaction and voice upload. DM rooms belong to their two participants, group rooms to their members.
 - Pinning is limited to DMs and groups, so nobody can pin messages in open rooms.
-- Direct messages can only be sent between friends, checked on the server for every message.
+- Direct messages can only be sent between friends, checked server-side on every message.
 - Message sending is rate limited per connection, and reactions are restricted to a fixed set so arbitrary text never becomes a database key.
 - Unauthorized access to another player's resources returns 404, not 403, to avoid leaking existence.
-- Blocking a player hides your presence from them and prevents future friend requests or DMs.
-- Request bodies use strict schemas (unknown fields rejected), with matching validators at the database layer.
+- Blocking a player hides your presence from them and prevents future friend requests and DMs.
+- Request bodies use strict schemas (unknown fields rejected) with matching validators at the database layer.
 - High-risk routes re-check account status, so suspensions apply mid-session.
 - Admin routes are separated and audited.
 
-To report a vulnerability, please use GitHub's private vulnerability reporting on this repository rather than a public issue.
+To report a vulnerability, use GitHub's private vulnerability reporting on this repository rather than a public issue.
 
 ## Troubleshooting
 
@@ -508,13 +481,22 @@ To report a vulnerability, please use GitHub's private vulnerability reporting o
 | Integration tests fail to connect | Wrong or missing `MONGODB_URI` | Check `.env` against `.env.example`; allow your IP in Atlas network access |
 | `npm install` fails on engine check | Node older than 20.19.0 | Upgrade Node |
 | `verify:indexes` reports drift | Migration not applied | Run `npm run migrate`, then re-verify |
-| Ratings or XP never update in a deployment | Worker not running | Start the background worker (`npm run start:worker`) |
+| Ratings or XP never update | Worker not running | Start the background worker (`npm run start:worker`) |
 | Deliveries stuck in dead-letter | Persistent consumer failure | Fix the root cause, then `npm run replay:dead-letter <id>` |
-| Chat connects but no messages appear | Client not emitting `join_room` | Ensure the client joins `global_chat` or the correct DM room ID |
-| Joining a room returns "Unauthorized" | You are not a participant or member | Open the DM through `/api/chat/dm-by-id/:playerId`, or ask to be added to the group |
+| Chat connects but no messages appear | Client not emitting `join_room` | Join `global_chat` or the correct room ID |
+| Joining a room returns "Unauthorized" | Not a participant or member | Open the DM via `/api/chat/dm-by-id/:playerId`, or ask to be added to the group |
 | Creating a second group with the same name fails | Old unique index still present | Restart the API once so it can replace the index |
-| WebRTC call fails to connect | STUN/TURN server unreachable | Check client ICE configuration; ensure both peers are online |
-| Calls work on one network but not across networks | No TURN relay configured | Provide a TURN server in the client's ICE configuration |
+| WebRTC call fails to connect | STUN/TURN unreachable | Check the client's ICE configuration; ensure both peers are online |
+| Calls work on one network but not across networks | No TURN relay | Provide a TURN server in the client's ICE configuration |
+| Browser app blocked by CORS | Frontend origin not allowed | Add the frontend's origin to the API's CORS configuration |
+
+## Known limitations
+
+- **Presence and signaling are in-memory.** Run a single API instance, or add a shared store such as Redis before scaling out.
+- **Signaling is fire-and-forget.** If the call target is offline the event is dropped and the caller times out.
+- **Projections need the worker.** Without the background worker running, ratings, XP and leaderboards do not update.
+- **Cold starts on the free tier.** An idle Render instance can take a while to answer the first request.
+- **Integration tests need a real Atlas cluster.** They are not hermetic by design.
 
 ## License
 
@@ -524,6 +506,6 @@ Released under the MIT license. See [LICENSE](./LICENSE).
 
 <div align="center">
 
-Built by [shaurya-10000](https://github.com/shaurya-10000) · [Report a bug](https://github.com/shaurya-10000/fps-game-database/issues)
+Built by [shaurya-10000](https://github.com/shaurya-10000) · [Report a bug](https://github.com/shaurya-10000/fps-game-database/issues) · [Frontend repo](https://github.com/shaurya-10000/fps-game-database-web)
 
 </div>

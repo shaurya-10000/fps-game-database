@@ -28,6 +28,7 @@ import { buildProfileOverviewRouter } from "./domain/players/overview-routes";
 import { canAccessRoom } from "./domain/chat/room-access";
 import { AuthService } from "./domain/auth/auth-service";
 import { buildAuthRouter } from "./domain/auth/routes";
+import { buildStatusRouter } from "./status/routes";
 
 const env = loadEnv();
 const client = getMongoClient(env);
@@ -54,6 +55,14 @@ if (!fs.existsSync("uploads")) { fs.mkdirSync("uploads"); }
 
 // Health check
 app.get("/health", (req, res) => { res.status(200).json({ status: "ok", env: env.NODE_ENV }); return; });
+
+// Public status page (HTML). /health stays JSON for Render and uptime monitors.
+app.use(buildStatusRouter({
+  db,
+  environment: env.NODE_ENV,
+  commit: process.env["RENDER_GIT_COMMIT"] ?? null,
+  isRealtimeUp: () => app.locals['io'] !== undefined,
+}));
 
 // Auth Middleware
 const authMiddleware = async (req: express.Request, res: express.Response, next: express.NextFunction): Promise<void> => {

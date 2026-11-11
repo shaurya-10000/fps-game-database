@@ -80,7 +80,7 @@ const authMiddleware = async (req: express.Request, res: express.Response, next:
     next();
   } catch (err) {
     logger.warn("Auth failed", { error: String(err) });
-    res.status(401).json({ error: "Unauthorized" });
+    res.status(401).json({ error: "Unauthorized", reason: String(err) });
     return;
   }
 };

@@ -36,7 +36,7 @@ export class IdentityProvider {
       };
     } catch (err) {
       logger.warn("Token verification failed", { error: String(err) });
-      throw new Error("Invalid token: " + String(err));
+      throw new Error("Invalid token");
     }
   }
 }

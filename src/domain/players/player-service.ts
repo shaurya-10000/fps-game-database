@@ -33,6 +33,13 @@ export class PlayerService {
     const playersCol = this.db.collection<Player>("players");
     const identitiesCol = this.db.collection<Document>("playerIdentities");
 
+    // Local email/password tokens: `sub` is already the player's _id
+    if (principal.provider === "local") {
+      const localPlayer = await playersCol.findOne({ _id: principal.providerId });
+      if (!localPlayer) throw new Error("Player not found for local token.");
+      return localPlayer;
+    }
+
     const existingIdentity = await identitiesCol.findOne({
       provider: principal.provider,
       providerId: principal.providerId,

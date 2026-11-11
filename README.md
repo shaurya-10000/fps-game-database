@@ -13,7 +13,7 @@ Canonical match recording, transactional outbox, sequence-ordered Elo ratings, m
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org)
 [![Socket.io](https://img.shields.io/badge/Socket.io-4.0+-black?logo=socket.io)](https://socket.io)
 
-[**Live API health check**](https://fps-game-database.onrender.com/health) · [**Frontend repo**](https://github.com/shaurya-10000/fps-game-database-web) · [**Report a bug**](https://github.com/shaurya-10000/fps-game-database/issues)
+[**Live API**](https://fps-game-database.onrender.com) · [**Frontend repo**](https://github.com/shaurya-10000/fps-game-database-web) · [**Report a bug**](https://github.com/shaurya-10000/fps-game-database/issues)
 
 </div>
 

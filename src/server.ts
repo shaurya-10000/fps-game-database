@@ -96,7 +96,7 @@ app.get("/api/me/profile", authMiddleware, async (req, res) => {
     const db = req.app.locals['db'] as Db;
     type Doc = { _id: string } & import("mongodb").Document;
     const p = await db.collection<Doc>("players").findOne({ _id: playerId });
-    res.json({ playerId, displayName: p?.["displayName"] ?? "", username: p?.["username"] ?? "", avatarUrl: p?.["avatarUrl"] ?? null });
+    res.json({ playerId, displayName: p?.["displayName"] ?? "", username: p?.["username"] ?? "", avatarUrl: p?.["avatarUrl"] ?? null, bannerUrl: p?.["bannerUrl"] ?? null });
   } catch (err) {
     logger.error("Profile fetch failed", { error: String(err) });
     res.status(500).json({ error: "FETCH_FAILED" });
@@ -105,7 +105,7 @@ app.get("/api/me/profile", authMiddleware, async (req, res) => {
 
 app.patch("/api/me/profile", authMiddleware, async (req, res) => {
   try {
-    const { displayName, username, email, avatarUrl } = req.body ?? {};
+    const { displayName, username, email, avatarUrl, bannerUrl } = req.body ?? {};
     const playerId = req.ctx?.player?._id;
     if (!playerId) { res.status(401).json({ error: "UNAUTHORIZED" }); return; }
     const db = req.app.locals['db'] as Db;
@@ -305,4 +305,5 @@ export function startServer() {
   server.listen(env.PORT, () => { logger.info(`Server and Chat listening on port ${env.PORT}`); });
   return server;
 }
+
 

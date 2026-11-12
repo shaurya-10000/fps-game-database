@@ -96,7 +96,7 @@ app.get("/api/me/profile", authMiddleware, async (req, res) => {
     const db = req.app.locals['db'] as Db;
     type Doc = { _id: string } & import("mongodb").Document;
     const p = await db.collection<Doc>("players").findOne({ _id: playerId });
-    res.json({ playerId, displayName: p?.["displayName"] ?? "", username: p?.["username"] ?? "" });
+    res.json({ playerId, displayName: p?.["displayName"] ?? "", username: p?.["username"] ?? "", avatarUrl: p?.["avatarUrl"] ?? null });
   } catch (err) {
     logger.error("Profile fetch failed", { error: String(err) });
     res.status(500).json({ error: "FETCH_FAILED" });
@@ -105,7 +105,7 @@ app.get("/api/me/profile", authMiddleware, async (req, res) => {
 
 app.patch("/api/me/profile", authMiddleware, async (req, res) => {
   try {
-    const { displayName, username, email } = req.body ?? {};
+    const { displayName, username, email, avatarUrl } = req.body ?? {};
     const playerId = req.ctx?.player?._id;
     if (!playerId) { res.status(401).json({ error: "UNAUTHORIZED" }); return; }
     const db = req.app.locals['db'] as Db;
@@ -173,6 +173,51 @@ app.get("/api/me/players/search", authMiddleware, async (req, res) => {
   } catch (err) { res.status(500).json({ error: "INTERNAL_SERVER_ERROR" }); }
 });
 
+
+// Avatar upload — accepts base64 data URL, stores directly on player doc
+app.post("/api/me/avatar", authMiddleware, async (req, res) => {
+  try {
+    const playerId = req.ctx?.player?._id;
+    if (!playerId) { res.status(401).json({ error: "UNAUTHORIZED" }); return; }
+    const { avatarUrl } = req.body ?? {};
+
+    if (typeof avatarUrl !== "string" || avatarUrl.length === 0) {
+      res.status(400).json({ error: "MISSING_AVATAR" }); return;
+    }
+    const m = /^data:image\/(jpeg|png|webp);base64,/.exec(avatarUrl);
+    if (!m) { res.status(400).json({ error: "INVALID_AVATAR_FORMAT" }); return; }
+    if (avatarUrl.length > 140_000) { res.status(400).json({ error: "AVATAR_TOO_LARGE" }); return; }
+
+    const db = req.app.locals['db'] as Db;
+    type Doc = { _id: string } & import("mongodb").Document;
+    await db.collection<Doc>("players").updateOne(
+      { _id: playerId },
+      { $set: { avatarUrl, updatedAt: new Date() } }
+    );
+    res.json({ avatarUrl });
+  } catch (err) {
+    logger.error("Avatar upload failed", { error: String(err) });
+    res.status(500).json({ error: "AVATAR_UPLOAD_FAILED" });
+  }
+});
+
+// Delete avatar
+app.delete("/api/me/avatar", authMiddleware, async (req, res) => {
+  try {
+    const playerId = req.ctx?.player?._id;
+    if (!playerId) { res.status(401).json({ error: "UNAUTHORIZED" }); return; }
+    const db = req.app.locals['db'] as Db;
+    type Doc = { _id: string } & import("mongodb").Document;
+    await db.collection<Doc>("players").updateOne(
+      { _id: playerId },
+      { $unset: { avatarUrl: "" }, $set: { updatedAt: new Date() } }
+    );
+    res.json({ success: true });
+  } catch (err) {
+    logger.error("Avatar delete failed", { error: String(err) });
+    res.status(500).json({ error: "AVATAR_DELETE_FAILED" });
+  }
+});
 // Chat Extras: Voice & Groups
 app.post("/api/chat/rooms/:roomId/voice", authMiddleware, upload.single("audio"), async (req, res) => {
   try {

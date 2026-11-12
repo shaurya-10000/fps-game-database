@@ -168,7 +168,7 @@ app.get("/api/me/players/search", authMiddleware, async (req, res) => {
     const players = await db.collection<{ _id: string, displayName: string } & import("mongodb").Document>("players").find({ 
       displayName: { $regex: "^" + q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), $options: "i" },
       _id: { $ne: myId }
-    }).project({ _id: 1, displayName: 1 }).limit(20).toArray();
+    }).project({ _id: 1, displayName: 1, avatarUrl: 1 }).limit(20).toArray();
     res.json({ results: players });
   } catch (err) { res.status(500).json({ error: "INTERNAL_SERVER_ERROR" }); }
 });
@@ -305,3 +305,4 @@ export function startServer() {
   server.listen(env.PORT, () => { logger.info(`Server and Chat listening on port ${env.PORT}`); });
   return server;
 }
+

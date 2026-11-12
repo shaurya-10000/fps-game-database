@@ -176,3 +176,4 @@ function handle(err: unknown, res: Response): void {
   }
   res.status(500).json({ error: "INTERNAL_SERVER_ERROR" });
 }
+

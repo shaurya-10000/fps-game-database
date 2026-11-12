@@ -123,9 +123,43 @@ app.patch("/api/me/profile", authMiddleware, async (req, res) => {
       return;
     }
 
-    const set: Record<string, unknown> = { updatedAt: new Date() };
-    if (nextDisplay) set["displayName"] = nextDisplay;   // not unique
-    if (nextUsername) set["username"] = nextUsername;    // unique
+        const set: Record<string, unknown> = { updatedAt: new Date() };
+    if (nextDisplay) set["displayName"] = nextDisplay;
+    if (nextUsername) set["username"] = nextUsername;
+
+    // Handle avatarUrl
+    if (avatarUrl !== undefined) {
+      if (avatarUrl === null) {
+        set["avatarUrl"] = null;
+      } else if (typeof avatarUrl === "string") {
+        if (!/^data:image\/(jpeg|png|webp);base64,/.test(avatarUrl)) {
+          res.status(400).json({ error: "INVALID_AVATAR_FORMAT" }); return;
+        }
+        if (avatarUrl.length > 140_000) {
+          res.status(400).json({ error: "AVATAR_TOO_LARGE" }); return;
+        }
+        set["avatarUrl"] = avatarUrl;
+      } else {
+        res.status(400).json({ error: "INVALID_AVATAR_FORMAT" }); return;
+      }
+    }
+
+    // Handle bannerUrl
+    if (bannerUrl !== undefined) {
+      if (bannerUrl === null) {
+        set["bannerUrl"] = null;
+      } else if (typeof bannerUrl === "string") {
+        if (!/^data:image\/(jpeg|png|webp);base64,/.test(bannerUrl)) {
+          res.status(400).json({ error: "INVALID_BANNER_FORMAT" }); return;
+        }
+        if (bannerUrl.length > 300_000) {
+          res.status(400).json({ error: "BANNER_TOO_LARGE" }); return;
+        }
+        set["bannerUrl"] = bannerUrl;
+      } else {
+        res.status(400).json({ error: "INVALID_BANNER_FORMAT" }); return;
+      }
+    }
 
     try {
       await db.collection<Doc>("players").updateOne({ _id: playerId }, { $set: set });
@@ -305,5 +339,6 @@ export function startServer() {
   server.listen(env.PORT, () => { logger.info(`Server and Chat listening on port ${env.PORT}`); });
   return server;
 }
+
 
 

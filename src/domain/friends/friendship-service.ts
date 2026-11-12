@@ -181,6 +181,21 @@ export class FriendshipService {
     return new Map(players.map((p) => [p._id, String(p["displayName"] ?? "")] as [string, string]));
   }
 
+  private async avatars(ids: string[]): Promise<Map<string, string | null>> {
+    const unique = [...new Set(ids.filter(Boolean))];
+    const map = new Map<string, string | null>();
+    if (unique.length === 0) return map;
+    const players = await this.db
+      .collection<{ _id: string; avatarUrl?: string | null }>("players")
+      .find({ _id: { $in: unique } })
+      .toArray();
+    for (const p of players) {
+      const url = p["avatarUrl"];
+      map.set(String(p["_id"]), typeof url === "string" ? url : null);
+    }
+    return map;
+  }
+
   /** Friends list with each friend's current display name attached. */
   async listFriendsWithNames(playerId: string, limit = 100) {
     const rows = await this.listFriends(playerId, limit);
@@ -304,3 +319,4 @@ export class FriendshipService {
     logger.info("Player blocked", { blockerId, blockedId });
   }
 }
+

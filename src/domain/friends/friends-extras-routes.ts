@@ -46,9 +46,24 @@ export function buildFriendsExtrasRouter(db: Db): Router {
   // Requests I have sent that are still waiting.
   router.get("/me/friends/requests/outgoing", route(async (_req, res, me) => {
     const rows = await friendships.find({ fromPlayerId: me, status: "pending" }).sort({ createdAt: -1 }).limit(LIMIT).toArray();
-    const lookup = await names(rows.map((r) => String(r["toPlayerId"])));
+    const ids = rows.map((r) => String(r["toPlayerId"]));
+    const lookup = await names(ids);
+    // Fetch avatars for the same ids
+    const players = await (res.req.app.locals["db"] as import("mongodb").Db)
+      .collection<{ _id: string; avatarUrl?: string | null }>("players")
+      .find({ _id: { $in: ids } })
+      .toArray();
+    const avatarMap = new Map<string, string | null>();
+    for (const p of players) {
+      const url = p["avatarUrl"];
+      avatarMap.set(String(p["_id"]), typeof url === "string" ? url : null);
+    }
     res.json({
-      outgoing: rows.map((r) => ({ ...r, toPlayerName: lookup.get(String(r["toPlayerId"])) || String(r["toPlayerId"]) })),
+      outgoing: rows.map((r) => ({
+        ...r,
+        toPlayerName: lookup.get(String(r["toPlayerId"])) || String(r["toPlayerId"]),
+        avatarUrl: avatarMap.get(String(r["toPlayerId"])) ?? null,
+      })),
     });
   }));
 
@@ -94,3 +109,4 @@ export function buildFriendsExtrasRouter(db: Db): Router {
 
   return router;
 }
+

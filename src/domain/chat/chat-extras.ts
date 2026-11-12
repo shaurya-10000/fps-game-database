@@ -262,14 +262,31 @@ export class ChatExtrasService {
       return [String(d["senderId"]), ...(pinned?.by ? [pinned.by] : [])];
     });
     const names = await this.names(ids);
+    const avatars = await this.avatars(ids);
     return docs.map((d) => {
       const pinned = d["pinned"] as { by: string; at: Date } | undefined;
       return {
         ...d,
         senderName: names.get(String(d["senderId"])) || d["senderName"] || String(d["senderId"]).slice(0, 8),
+        senderAvatarUrl: avatars.get(String(d["senderId"])) ?? d["senderAvatarUrl"] ?? null,
         ...(pinned ? { pinned: { ...pinned, byName: names.get(pinned.by) || pinned.by.slice(0, 8) } } : {}),
       };
     });
+  }
+
+  private async avatars(ids: string[]): Promise<Map<string, string | null>> {
+    const unique = [...new Set(ids.filter(Boolean))];
+    const map = new Map<string, string | null>();
+    if (unique.length === 0) return map;
+    const players = await this.db
+      .collection<{ _id: string; avatarUrl?: string | null }>("players")
+      .find({ _id: { $in: unique } })
+      .toArray();
+    for (const p of players) {
+      const url = p["avatarUrl"];
+      map.set(String(p["_id"]), typeof url === "string" ? url : null);
+    }
+    return map;
   }
 
   async pin(actorId: string, roomId: string, messageId: string, io: Io | null): Promise<void> {
@@ -630,3 +647,5 @@ export function buildChatExtrasRouter(db: Db): Router {
 
   return router;
 }
+
+

@@ -10,6 +10,7 @@ export interface ChatReplyRef {
 
 export interface ChatMessage {
   senderName: string;
+  senderAvatarUrl?: string | null;
   _id: string;
   roomId: string;
   senderId: string;
@@ -115,6 +116,7 @@ export class ChatService {
       roomId,
       senderId,
       senderName,
+      senderAvatarUrl: player ? player["avatarUrl"] ?? null : null,
       content,
       createdAt: new Date(),
     };
@@ -154,18 +156,28 @@ export class ChatService {
       .limit(limit)
       .toArray();
 
-    // Fetch display names for any messages missing them
+    // Fetch display names and avatars for any messages missing them
     const senderIds = [...new Set(msgs.map((m) => m.senderId))];
     const players = await this.db
-      .collection<{ _id: string; displayName: string } & Document>("players")
+      .collection<{ _id: string; displayName: string; avatarUrl?: string | null } & Document>("players")
       .find({ _id: { $in: senderIds } })
       .toArray();
 
+    const avatarMap = new Map<string, string | null>();
+    for (const p of players) {
+      const url = p["avatarUrl"];
+      avatarMap.set(String(p["_id"]), typeof url === "string" ? url : null);
+    }
     const nameMap = new Map(players.map((p) => [p._id, p.displayName]));
 
     return msgs.map((m) => ({
       ...m,
       senderName: nameMap.get(m.senderId) || m.senderName || m.senderId.slice(0, 8),
+      senderAvatarUrl: avatarMap.get(m.senderId) ?? m.senderAvatarUrl ?? null,
     }));
   }
 }
+
+
+
+
